@@ -2,7 +2,8 @@
 import { loadFonts } from './fonts';
 import { loadLibrary } from './library';
 import { S, emit, on, openProject, save, doUndo, doRedo, setTime, select, selObj, edit, toast, snapT } from './state';
-import { rt, setView, redraw } from './ui/viewport';
+import { rt, setView, redraw, perfInfo } from './ui/viewport';
+import { fullQuality } from 'engine/core.js';
 import { zoom, fit } from './ui/timeline';
 import { showStart, duplicate, deleteSelection, pollRender } from './ui/panels';
 import { onRenderChanged } from './ui/workspaces';
@@ -59,9 +60,11 @@ if (import.meta.hot) {
   key: (id: string, prop: string, t: number, v: any) => { const o = S.doc.objects.find((x) => x.id === id); if (!o) throw new Error('no object ' + id); edit(() => setValue(o, prop, t, v, true)); },
   value: (id: string, prop: string, t = S.t) => { const o = S.doc.objects.find((x) => x.id === id); return o ? valueAt(o, prop, t) : undefined; },
   /** The finished frame at t as a data URL (for checking a frame). */
-  frame: (t = S.t, q = 0.9) => { rt.draw(t); return rt.frame.toDataURL('image/jpeg', q); },
-  /** Save the frame at t to Exports/<project>/snapshots/<file>.jpg (so Claude can look at it). */
-  snapshot: async (t = S.t, file = `t${t.toFixed(2)}`) => { rt.draw(t); const r = await fetch(`/api/snapshot?name=${encodeURIComponent(S.project)}&file=${encodeURIComponent(file)}`, { method: 'POST', body: rt.frame.toDataURL('image/jpeg', 0.9) }); return (await r.json()).file; },
+  frame: (t = S.t, q = 0.9) => fullQuality(() => { rt.draw(t); return rt.frame.toDataURL('image/jpeg', q); }),
+  /** Save the frame at t to Exports/<project>/snapshots/<file>.jpg (so Claude can look at it). Always full quality. */
+  snapshot: async (t = S.t, file = `t${t.toFixed(2)}`) => { const body = fullQuality(() => { rt.draw(t); return rt.frame.toDataURL('image/jpeg', 0.9); }); redraw(); const r = await fetch(`/api/snapshot?name=${encodeURIComponent(S.project)}&file=${encodeURIComponent(file)}`, { method: 'POST', body }); return (await r.json()).file; },
+  /** Preview speed: the quality the viewport uses now and the measured frames per second. */
+  perf: () => perfInfo(),
   errors: () => rt.errors,
 };
 

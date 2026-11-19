@@ -405,4 +405,10 @@ function projectPanel(): any[] {
 }
 
 on('doc', render); on('select', render); on('ws', render); onLibrary(() => { if (S.ws === 'camera' || S.ws === 'scene') render(); });
-on('time', () => { if (!S.playing) render(); });
+// scrubbing moves the time many times a second: rebuild the panel at most ~12 times a second (and once at the end)
+let timeQ: number | null = null, lastTimeR = 0;
+on('time', () => {
+  if (S.playing || timeQ != null) return;
+  const wait = Math.max(0, 80 - (performance.now() - lastTimeR));
+  timeQ = window.setTimeout(() => requestAnimationFrame(() => { timeQ = null; lastTimeR = performance.now(); if (!S.playing) render(); }), wait);
+});

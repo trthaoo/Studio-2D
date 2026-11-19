@@ -107,6 +107,9 @@ body[data-ws=script] #timeline, body[data-ws=library] #timeline, body[data-ws=ex
 .vtool .kbd { font-size: .77rem; color: var(--dim2); border: 1px solid var(--line2); border-radius: 3px; padding: 0 4px; }
 .vlabel { color: var(--dim); font-size: .92rem; padding: 0 6px 0 8px; }
 .vhint { position: absolute; left: 0; right: 0; bottom: 5px; text-align: center; color: #aeb6c3; font-size: .92rem; pointer-events: none; padding: 0 12px; }
+.vperf { position: absolute; top: 10px; left: 10px; z-index: 5; display: flex; align-items: center; gap: 8px; }
+.vperf-sel { font-size: .82rem; padding: 2px 4px; background: rgba(22,24,29,.94); color: #aeb6c3; border: 1px solid var(--line2); border-radius: 4px; }
+.vperf-fps { font-size: .82rem; color: #8fa0b5; pointer-events: none; font-variant-numeric: tabular-nums; }
 .vmode { position: absolute; top: 12px; right: 12px; font-size: .85rem; padding: 3px 8px; border-radius: 3px; z-index: 5; pointer-events: none; border: 1px solid; }
 .vmode.all { color: #9fc8a8; border-color: #35513d; }
 .vmode.key { color: #f0c27a; border-color: #6a4e22; }

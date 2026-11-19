@@ -2,6 +2,7 @@
 // In the studio console: (await import('/src/debugTurn.ts')).turn({ ...params }, { arms: 'down' })
 import { Runtime } from './runtime';
 import { normalize } from './doc';
+import { fullQuality } from 'engine/core.js';
 
 /** Head close-ups: one row per hair style, one column per angle. */
 export async function heads(base: any, styles: string[], angles: number[], file = 'heads', extra: any = {}) {
@@ -15,7 +16,7 @@ export async function heads(base: any, styles: string[], angles: number[], file 
     const rt = new Runtime(); rt.sync(doc);
     angles.forEach((a, i) => {
       (doc.objects[0].tracks as any).rotY = [{ t: 0, v: a }];
-      const f = rt.draw(0, { captions: false });
+      const f = fullQuality(() => rt.draw(0, { captions: false }));
       sx.drawImage(f, 0, 380, 1080, 1080, i * W, r * H, W, H);
     });
   }
@@ -36,7 +37,7 @@ export async function turn(params: any, o: { arms?: string; armL?: string; armR?
   const rt = new Runtime(); rt.sync(doc);
   angles.forEach((a, i) => {
     (doc.objects[1].tracks as any).rotY = [{ t: 0, v: a }];
-    const f = rt.draw(o.walk ? 0.4 : 0, { captions: false });
+    const f = fullQuality(() => rt.draw(o.walk ? 0.4 : 0, { captions: false }));
     sx.drawImage(f, 140, 120, 800, 1267, i * W, 0, W, H);
     sx.fillStyle = '#000'; sx.font = '16px sans-serif'; sx.fillText(String(a), i * W + 6, 18);
   });

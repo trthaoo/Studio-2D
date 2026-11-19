@@ -1,7 +1,7 @@
 // Runtime: builds the three.js world from a SceneDoc with the skill's engine, and draws any moment of it.
 // Pure function of (doc, t): the studio view, the timeline scrub and the offline render all go through here.
 import * as THREE from 'three';
-import { renderStage, glCanvas, W, H, V3, DEG } from 'engine/core.js';
+import { renderStage, glCanvas, W, H, V3, DEG, RW, RH } from 'engine/core.js';
 import { makeStage, lamp } from 'engine/stage.js';
 import { makeChar, stand, sitOn, sit, exprAt, talkAt, WALK_STRIDE } from 'engine/chars.js';
 import { buildCar, rollWheels, brakeLights } from 'engine/cars.js';
@@ -37,7 +37,7 @@ export class Runtime {
   doc!: SceneDoc;
   stages = new Map<string, BuiltStage>();
   built = new Map<string, Built>();
-  frame = document.createElement('canvas');      // the finished 1080x1920 frame
+  frame = document.createElement('canvas');      // the finished frame: 1080x1920, or smaller at a preview quality (engine RW x RH)
   ctx: CanvasRenderingContext2D;
   hideOnly = new Set<string>();                    // layer export: objects left out of this draw
   freeCam: THREE.PerspectiveCamera | null = null;  // studio free view instead of the cut camera
@@ -320,21 +320,24 @@ export class Runtime {
 
   /** The finished frame at t into this.frame (and returned). captions: draw the caption cards. */
   draw(t: number, o: { captions?: boolean; clear?: boolean } = {}) {
-    const ctx = this.ctx; ctx.globalAlpha = 1; ctx.filter = 'none';
+    const ctx = this.ctx;
+    // the frame is as big as the render (captions and everything else still draw in 1080x1920 units)
+    if (this.frame.width !== RW || this.frame.height !== RH) { this.frame.width = RW; this.frame.height = RH; }
+    ctx.setTransform(RW / W, 0, 0, RH / H, 0, 0); ctx.globalAlpha = 1; ctx.filter = 'none';
     if (o.clear) ctx.clearRect(0, 0, W, H); else { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); }
     const forced = this.forceCam ? this.cameraObj(this.forceCam) : null;
     if (this.freeCam) {
       const sid = this.freeStage || this.doc.stages[0]?.id;
-      const bs = this.drawView(sid, t, null); if (bs) ctx.drawImage(glCanvas, 0, 0);
+      const bs = this.drawView(sid, t, null); if (bs) ctx.drawImage(glCanvas, 0, 0, W, H);
     } else if (forced) {
-      const bs = this.drawView(forced.stage, t, forced); if (bs) { ctx.filter = bs.st.grade || GRADE; ctx.drawImage(glCanvas, 0, 0); ctx.filter = 'none'; }
+      const bs = this.drawView(forced.stage, t, forced); if (bs) { ctx.filter = bs.st.grade || GRADE; ctx.drawImage(glCanvas, 0, 0, W, H); ctx.filter = 'none'; }
     } else {
       const { cur, prev, blend } = activeCut(this.doc, t);
       const views = prev ? [[prev, 1], [cur, blend]] as const : [[cur, 1]] as const;
       for (const [cut, a] of views) {
         const cam = cut ? this.cameraObj(cut.camera) : null; if (!cam) continue;
         const bs = this.drawView(cam.stage, t, cam); if (!bs) continue;
-        ctx.globalAlpha = a; ctx.filter = bs.st.grade || GRADE; ctx.drawImage(glCanvas, 0, 0);
+        ctx.globalAlpha = a; ctx.filter = bs.st.grade || GRADE; ctx.drawImage(glCanvas, 0, 0, W, H);
       }
       ctx.globalAlpha = 1; ctx.filter = 'none';
     }
@@ -442,9 +445,17 @@ function walkState(o: SceneObject, t: number, R = 0.2): { phase: number; amt: nu
   const wk = o.tracks.walk;
   if (wk && wk.some((k) => Number(k.v) !== 0)) {
     if (Math.abs(valueAt(o, 'walk', t) as number) < 0.05) return undefined;   // standing at this moment
-    let ph = 0; const dt = 1 / 60;
-    for (let s = 0; s < t; s += dt) ph += (valueAt(o, 'walk', s) as number) * Math.PI * Math.min(dt, t - s);
-    return { phase: ph, amt: 1, dir: [1, 0] };
+    // phase = integral of the walk speed: a table built once per change of the track (not summed again every frame)
+    const sig = 'w' + JSON.stringify(wk);
+    let c = walkCache.get(o.id);
+    if (!c || c.sig !== sig) {
+      const dt = 1 / 120, end = Math.max(...wk.map((k) => k.t)) + 0.5, n = Math.ceil(end / dt) + 2, ph = new Float32Array(n);
+      for (let i = 1; i < n; i++) ph[i] = ph[i - 1] + (valueAt(o, 'walk', (i - 0.5) * dt) as number) * Math.PI * dt;
+      c = { sig, dt, ph }; walkCache.set(o.id, c);
+    }
+    const f = t / c.dt, n = c.ph.length, last = c.ph[n - 1];
+    const phase = f >= n - 1 ? last + (t - (n - 1) * c.dt) * (valueAt(o, 'walk', t) as number) * Math.PI : c.ph[Math.floor(f)] + (c.ph[Math.floor(f) + 1] - c.ph[Math.floor(f)]) * (f - Math.floor(f));
+    return { phase, amt: 1, dir: [1, 0] };
   }
   if (o.params.autoWalk === false) return undefined;
   const pk = o.tracks.pos; if (!pk || pk.length < 2) return undefined;

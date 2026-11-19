@@ -6,6 +6,7 @@ import { S, on, emit, select, selObj, edit, beginGesture, endGesture, changed, c
 import { applyValue, valueAt, activeCut, JOINTS, JOINT_VI, Joint, Vec3, SceneObject } from '../doc';
 import { audioPlay, audioPause, audioSync } from './audio';
 import { h } from './dom';
+import { setQuality, QUALITY, RW, RH } from 'engine/core.js';
 
 export const rt = new Runtime();
 const cv = document.getElementById('view') as HTMLCanvasElement;
@@ -46,7 +47,8 @@ function toolbar() {
   rt.forceCam = S.ws === 'camera' ? viewedCam()?.id || null : null;
   redraw();
 }
-on('select', toolbar); on('doc', toolbar); on('ws', toolbar); on('time', () => { if (S.ws === 'camera' && selObj()?.kind !== 'camera') toolbar(); });
+on('select', toolbar); on('doc', toolbar); on('ws', toolbar); let lastViewed: string | null = null;   // in the Camera workspace, rebuild the bar only when the cut camera changes
+on('time', () => { if (S.ws === 'camera' && selObj()?.kind !== 'camera') { const id = viewedCam()?.id || null; if (id !== lastViewed) { lastViewed = id; toolbar(); } } });
 export const refreshToolbar = toolbar;
 
 // free view camera (orbit)
@@ -81,16 +83,76 @@ function layout() {
 new ResizeObserver(layout).observe(wrap);
 on('ws', () => requestAnimationFrame(layout));
 
+// ---------------------------------------------------------------- preview quality
+// The view is much smaller than 1080x1920, so it renders only as many pixels as it shows. While something moves
+// (playing, scrubbing, dragging) the quality adapts to the machine: when frames come too slowly it steps down
+// (fewer pixels, less anti-aliasing, fewer shadow and blur samples), when there is room it steps back up. When
+// everything stops, the still frame is drawn again sharp. Renders and snapshots are always full quality.
+type QMode = 'auto' | 'high' | 'mid' | 'low';
+const LEVELS = [   // k: share of the view's own resolution
+  { k: 1.0, msaa: 4, ao: 12, dof: 48, shadow: 2048 },
+  { k: 0.85, msaa: 4, ao: 12, dof: 32, shadow: 2048 },
+  { k: 0.72, msaa: 2, ao: 0, dof: 20, shadow: 2048 },   // fewer contact-shadow samples look grainy: off instead
+  { k: 0.6, msaa: 0, ao: 0, dof: 12, shadow: 1024 },
+  { k: 0.48, msaa: 0, ao: 0, dof: 8, shadow: 1024 },
+];
+const Q_VI: Record<QMode, string> = { auto: 'Tự động', high: 'Cao', mid: 'Vừa', low: 'Thấp' };
+const FIXED: Record<Exclude<QMode, 'auto'>, number> = { high: 0, mid: 2, low: 4 };
+let qMode: QMode = (() => { try { const v = localStorage.getItem('2ds.quality') as QMode; return v in Q_VI ? v : 'auto'; } catch { return 'auto'; } })();
+let level = 1;                 // the auto level while things move (starts one step down; climbs if the machine allows)
+let holdUp = 0;                // no stepping up before this time (after a step up that was too slow)
+let win: number[] = [], winStart = 0, goodWins = 0, lastStep = 0;
+let fps = 0, fpsN = 0, fpsT = 0;
+let lastDraw = 0, drewStill = true, vsync = 16.7;
+/** Resolution of the frame as shown (device pixels): never render more than this. */
+const baseScale = () => Math.min(1, Math.max(0.25, (S.doc.height * scale) / 1920 * 1.1));
+function useLevel(i: number) { const L = LEVELS[i]; setQuality({ scale: baseScale() * L.k, msaa: L.msaa, ao: L.ao, dof: L.dof, shadow: L.shadow }); }
+/** Frame times while moving: step the level up or down once a second. */
+function measure(ts: number, interval: number) {
+  if (qMode !== 'auto') return;
+  if (!winStart) winStart = ts;
+  win.push(interval);
+  if (ts - winStart < 1000 || win.length < 12) return;
+  const s = [...win].sort((a, b) => a - b), med = s[s.length >> 1], p90 = s[Math.floor(s.length * 0.9)];
+  win = []; winStart = ts;
+  const target = Math.max(vsync, 1000 / 60) * 1.3;   // ~45 frames a second or better
+  if ((med > target || p90 > target * 1.8) && level < LEVELS.length - 1) {
+    if (ts - lastStep < 3000) holdUp = ts + 15000;    // just stepped up and it was too much: stay down a while
+    level++; lastStep = ts; goodWins = 0; useLevel(level);
+  } else if (med < Math.max(vsync, 1000 / 60) * 1.08 && level > 0 && ts > holdUp) {
+    if (++goodWins >= 3) { level--; lastStep = ts; goodWins = 0; useLevel(level); }
+  } else goodWins = 0;
+}
+export function perfInfo() { return { mode: qMode, level, fps: Math.round(fps), scale: +QUALITY.scale.toFixed(2), size: [RW, RH], msaa: QUALITY.msaa, ao: QUALITY.ao, shadow: QUALITY.shadow }; }
+const perfSel = h('select', { class: 'vperf-sel', title: 'Chất lượng xem trước. Chỉ ảnh hưởng khung xem trong studio, video xuất ra luôn ở chất lượng đầy đủ.' },
+  ...(Object.keys(Q_VI) as QMode[]).map((m) => h('option', { value: m, selected: m === qMode }, 'Xem trước: ' + Q_VI[m]))) as HTMLSelectElement;
+const perfFps = h('span', { class: 'vperf-fps' });
+perfSel.onchange = () => { qMode = perfSel.value as QMode; try { localStorage.setItem('2ds.quality', qMode); } catch { /* private window */ } level = qMode === 'auto' ? 1 : FIXED[qMode]; holdUp = 0; drewStill = false; redraw(); };
+wrap.append(h('div', { class: 'vperf' }, perfSel, perfFps));
+
 // ---------------------------------------------------------------- drawing
 let lastTs = 0;
 function loop(ts: number) {
   requestAnimationFrame(loop);
-  const dt = lastTs ? Math.min(0.1, (ts - lastTs) / 1000) : 0; lastTs = ts;
+  const interval = lastTs ? ts - lastTs : 0, dt = Math.min(0.1, interval / 1000); lastTs = ts;
   if (S.playing) {
     let t = S.t + dt; if (t >= S.doc.duration) { t = 0; audioSync(0, true); }
     S.t = t; emit('time'); audioSync(t); need = true;
   }
-  if (!need || !rt.doc) return; need = false;
+  const moving = S.playing || !!drag || ts - lastDraw < 130;   // frames asked for one after another
+  if (!need && !moving && !drewStill && ts - lastDraw > 220) need = true;   // things stopped: draw the still frame sharp
+  if (!need || !rt.doc) {
+    // an idle frame tells how fast the screen refreshes (60, 120, 144 Hz)
+    if (interval > 3 && interval < 40) vsync = vsync * 0.95 + interval * 0.05;
+    return;
+  }
+  need = false;
+  const still = qMode === 'auto' ? !moving : true;
+  useLevel(qMode === 'auto' ? (still ? 0 : level) : FIXED[qMode]);
+  if (moving && lastDraw && ts - lastDraw < 250) measure(ts, ts - lastDraw);
+  if (!moving) { fpsN = 0; fpsT = ts; perfFps.textContent = ''; }
+  else if (++fpsN && ts - fpsT > 500) { fps = (fpsN - 1) * 1000 / (ts - fpsT); fpsN = 1; fpsT = ts; perfFps.textContent = `${Math.round(fps)} khung/giây`; }
+  lastDraw = ts; drewStill = still;
   try {
     rt.draw(S.t, { captions: true });
     msg.textContent = rt.errors.length ? 'Lỗi: ' + rt.errors.join(' · ') : '';

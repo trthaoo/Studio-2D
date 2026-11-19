@@ -1093,9 +1093,18 @@ export function makeChar(o) {
     // expr may be a preset name ('flat') or a preset object; a name used to draw a face with no eyes, brows or mouth
     const ex = typeof p.expr === 'string' ? (PRE[p.expr] || PRE.calm) : (p.expr || PRE.calm);
     const c2d = cv.getContext('2d');
-    drawHead(c2d, S, { ox: f.dot(right), oy: f.dot(upv), front: f.dot(view), hair: o.hair, hair2: o.hair2, style: o.style, glasses: o.glasses, extra, shape: HSHAPE, adj: p.adj || null, hairOpts: o.hairOpts || null, hat: (o.acc || []).some((a) => HATS.has(String(a).split(':')[0])), skin: o.skin || null }, ex);
-    tex.needsUpdate = true;
-    if ((g._edgeChecks = (g._edgeChecks || 0) + 1) <= 4) {   // hair and hats don't change with the expression: check the first few draws
+    // 2D Studio: redraw (and upload) the 640 px face only when what it shows changed: the turn of the head (to a
+    // fraction of a pixel), the expression and the hand-made adjustments. A still or slow shot no longer re-uploads
+    // every character's face texture every frame.
+    const fx = f.dot(right), fy = f.dot(upv), fz = f.dot(view), qz = (v) => Math.round(v * 400);
+    const faceKey = qz(fx) + ',' + qz(fy) + ',' + qz(fz) + (typeof p.expr === 'string' ? p.expr : JSON.stringify(ex)) + (p.adj ? JSON.stringify(p.adj) : '');
+    const redrawn = faceKey !== g._faceKey;
+    if (redrawn) {
+      g._faceKey = faceKey;
+      drawHead(c2d, S, { ox: fx, oy: fy, front: fz, hair: o.hair, hair2: o.hair2, style: o.style, glasses: o.glasses, extra, shape: HSHAPE, adj: p.adj || null, hairOpts: o.hairOpts || null, hat: (o.acc || []).some((a) => HATS.has(String(a).split(':')[0])), skin: o.skin || null }, ex);
+      tex.needsUpdate = true;
+    }
+    if (redrawn && (g._edgeChecks = (g._edgeChecks || 0) + 1) <= 4) {   // hair and hats don't change with the expression: check the first few draws
       const edge = [c2d.getImageData(0, 0, S, 2), c2d.getImageData(0, S - 2, S, 2), c2d.getImageData(0, 0, 2, S), c2d.getImageData(S - 2, 0, 2, S)];
       for (const d of edge) for (let i = 3; i < d.data.length; i += 4) if (d.data[i] > 40) { g.clipped = true; break; }
     }
@@ -1122,8 +1131,17 @@ export function makeChar(o) {
         const front = Math.min(camPos.distanceTo(hw), camPos.distanceTo(cw)) < dist - pull - o.R * 0.1;
         limbs[i].material = ends[i].material = ends[i].userData.cap.material = front ? inkFront : inkMat;
       }
-      limbs[i].geometry.dispose();
-      limbs[i].geometry = new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(s0, tgt[i][0], tgt[i][1]), 16, lw, 6, false);
+      // 2D Studio: same vertex count every frame, so the new tube is copied into the buffers already on the GPU
+      // (and skipped when the limb did not move) instead of making new ones each frame
+      const lk = s0.x.toFixed(4) + s0.y.toFixed(4) + s0.z.toFixed(4) + tgt[i][0].x.toFixed(4) + tgt[i][0].y.toFixed(4) + tgt[i][0].z.toFixed(4) + tgt[i][1].x.toFixed(4) + tgt[i][1].y.toFixed(4) + tgt[i][1].z.toFixed(4);
+      if (limbs[i].userData.k !== lk) {
+        limbs[i].userData.k = lk;
+        const tube = new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(s0, tgt[i][0], tgt[i][1]), 16, lw, 6, false), old = limbs[i].geometry;
+        if (old.attributes.position && old.attributes.position.count === tube.attributes.position.count) {
+          for (const a of ['position', 'normal']) { old.attributes[a].array.set(tube.attributes[a].array); old.attributes[a].needsUpdate = true; }
+          old.boundingBox = null; old.computeBoundingSphere(); tube.dispose();
+        } else { old.dispose(); limbs[i].geometry = tube; }
+      }
       ends[i].position.copy(tgt[i][1]);
       if (i >= 2) { const fw = V3(fwd.x, 0, fwd.z); if (fw.lengthSq() < 1e-6) fw.set(1, 0, 0); fw.normalize(); ends[i].position.addScaledVector(fw, o.R * 0.07); ends[i].position.y += o.R * 0.03; ends[i].rotation.set(0, Math.atan2(-fw.z, fw.x), 0); }
     }

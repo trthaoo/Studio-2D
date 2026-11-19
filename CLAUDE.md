@@ -9,6 +9,8 @@ Vite + TypeScript + three.js (no framework), modeled on Rigging Studio (Desktop\
   (needs the studio running; uses Edge/Chrome headless + ffmpeg-static).
 - Code: `src/doc.ts` (scene format, keyframe evaluation), `src/runtime.ts` (doc → engine → frame), `src/ui/*`
   (viewport, timeline, panels), `src/renderPage.ts` + `scripts/render.mjs` (offline render, layer masks),
-  `vite.config.ts` (the /api back end). `src/debugTurn.ts`: turnaround / head sheets of a character saved as
+  `vite.config.ts` (the /api back end). Speed: the studio view renders at its own size and adapts quality while
+  things move (`engine/core.js` setQuality / fullQuality, levels in `src/ui/viewport.ts`, `studio.perf()`); renders,
+  `studio.frame` and `studio.snapshot` always use full quality. A character's face texture is redrawn only when it changes. `src/debugTurn.ts`: turnaround / head sheets of a character saved as
   snapshots, to check the engine from every side after changing `engine/chars.js` (hair, limbs, accessories). `engine/` is the skill's engine (three.js 0.187 pinned); `vendor/` is the
   original skill repo for reference.

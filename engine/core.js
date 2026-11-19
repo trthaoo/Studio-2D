@@ -230,8 +230,8 @@ const paintMat = new THREE.ShaderMaterial({
         float z0 = d >= 0.99999 ? 1e4 : viewZ, R = abs(coc(z0));
         if (R > 0.6) {
           vec3 acc = col; float ia = inkA, ws = 1.0;
-          for (int i = 0; i < 48; i++) {
-            float rr = sqrt((float(i) + 0.5) / 48.0) * R, a = float(i) * 2.39996323;
+          for (int i = 0; i < DOF_N; i++) {
+            float rr = sqrt((float(i) + 0.5) / float(DOF_N)) * R, a = float(i) * 2.39996323;
             vec2 suv = vUv + vec2(cos(a), sin(a)) * rr * px;
             float ds = texture2D(tDep, suv).r, zs = ds >= 0.99999 ? 1e4 : vz(ds), rs = abs(coc(zs));
             if (zs > z0) rs = min(rs, R);                  // the background never bleeds over a nearer pixel
@@ -242,15 +242,17 @@ const paintMat = new THREE.ShaderMaterial({
         }
       }
       // ambient occlusion from the depth buffer: nearer neighbours within aoR metres darken this pixel (contact shadows)
+      #if AO_N > 0
       if (d < 0.99999 && ao > 0.0) {
         float rp = clamp(aoR * focal / viewZ, 2.0, 60.0), occ = 0.0, rot = hash(vUv / px) * 6.2832;
-        for (int k = 0; k < 12; k++) {
-          float fk = float(k), a = rot + fk * 2.3999632, rr = rp * sqrt((fk + 0.5) / 12.0);
+        for (int k = 0; k < AO_N; k++) {
+          float fk = float(k), a = rot + fk * 2.3999632, rr = rp * sqrt((fk + 0.5) / float(AO_N));
           float sz = vz(texture2D(tDep, vUv + vec2(cos(a), sin(a)) * rr * px).r), dz = viewZ - sz;
           occ += smoothstep(0.03, 0.18, dz) * (1.0 - smoothstep(aoR, aoR * 2.5, dz));
         }
-        col *= 1.0 - ao * occ / 12.0;
+        col *= 1.0 - ao * occ / float(AO_N);
       }
+      #endif
       float hz = d >= 0.99999 ? haze.z * 0.6 : smoothstep(haze.x, haze.y, viewZ) * haze.z;
       col += texture2D(tBloom, vUv).rgb * bloom;
       col = mix(col, hazeCol, hz);
@@ -273,32 +275,61 @@ const paintMat = new THREE.ShaderMaterial({
       gl_FragDepth = d;
     }`,
   depthTest: true, depthWrite: true, depthFunc: THREE.AlwaysDepth,
+  defines: { AO_N: 12, DOF_N: 48 },
 });
 const paintScene = new THREE.Scene(), brushScene = new THREE.Scene(), paintCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const quadScene = new THREE.Scene(), quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), brightMat); quad.frustumCulled = false; quadScene.add(quad);
 { const q = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), paintMat); q.frustumCulled = false; paintScene.add(q);
   const b = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), brushMat); b.frustumCulled = false; brushScene.add(b); }
+// ------------------------------------------------------------------ quality (2D Studio)
+// The studio's live preview renders smaller and cheaper (glCanvas becomes RW x RH); every size in pixels (ink width,
+// brush, depth-of-field blur) scales with it, so the picture looks the same, only less sharp. Renders, snapshots and
+// exports run at FULL_QUALITY (fullQuality(fn)). scale: share of 1080x1920; msaa: anti-aliasing samples; ao / dof:
+// samples of contact shadows and depth-of-field blur (ao 0 = off); shadow: size of the sun's shadow map.
+export const FULL_QUALITY = Object.freeze({ scale: 1, msaa: 4, ao: 12, dof: 48, shadow: 4096 });
+export const QUALITY = { ...FULL_QUALITY };
+export let RW = W, RH = H;
+export function setQuality(q) {
+  const n = { ...QUALITY, ...q }; n.scale = clamp(n.scale, 0.2, 1);
+  const w = Math.max(8, Math.round(W * n.scale / 8) * 8), h = Math.round(w * H / W / 8) * 8;   // multiples of 8: the half and quarter buffers stay exact
+  if (w !== RW || h !== RH) {
+    RW = w; RH = h; renderer.setSize(w, h, false);
+    for (const t of [worldRT, normRT, inkRT, idRT]) t.setSize(w, h);
+    brushRT.setSize(w / 2, h / 2); bloomA.setSize(w / 4, h / 4); bloomB.setSize(w / 4, h / 4);
+    brushMat.uniforms.px.value.set(2 / w, 2 / h);
+    for (const m of [brightMat, normMat, inkMat, paintMat]) m.uniforms.px.value.set(1 / w, 1 / h);
+  }
+  if (n.msaa !== worldRT.samples) { worldRT.samples = n.msaa; worldRT.dispose(); }
+  const d = paintMat.defines; if (d.AO_N !== n.ao || d.DOF_N !== n.dof) { d.AO_N = n.ao; d.DOF_N = Math.max(4, n.dof); paintMat.needsUpdate = true; }
+  Object.assign(QUALITY, n); QUALITY.scale = RW / W;
+}
+export function fullQuality(fn) {
+  const keep = { ...QUALITY }; setQuality(FULL_QUALITY);
+  try { return fn(); } finally { setQuality(keep); }
+}
+
 // renderStage(stage): the painted world + crisp characters into glCanvas. stage.paint === false renders plainly.
 export function renderStage(stage) {
-  const { scene, camera } = stage, md = stage.mood || {};
+  const { scene, camera } = stage, md = stage.mood || {}, s = QUALITY.scale;
+  if (stage.sun && stage.sun.shadow.mapSize.x !== QUALITY.shadow) { stage.sun.shadow.mapSize.set(QUALITY.shadow, QUALITY.shadow); stage.sun.shadow.map?.dispose(); stage.sun.shadow.map = null; }
   if (stage.paint === false || md.paint === false) { camera.layers.enableAll(); renderer.render(scene, camera); camera.layers.set(0); return; }
   const P = { ...PAINT_DEFAULT, ...(md.paint || {}) };
   camera.layers.set(0);
   renderer.shadowMap.autoUpdate = true;
   renderer.setRenderTarget(worldRT); renderer.clear(); renderer.render(scene, camera);
   // the oil-paint brush is optional (paint: { radius: 3 }); off by default: a clean 3D render with ink lines
-  if (P.radius > 0) { brushMat.uniforms.radius.value = P.radius; renderer.setRenderTarget(brushRT); renderer.render(brushScene, paintCam); }
+  if (P.radius > 0) { brushMat.uniforms.radius.value = P.radius * s; renderer.setRenderTarget(brushRT); renderer.render(brushScene, paintCam); }
   if (P.bloom > 0) {
     quad.material = brightMat; brightMat.uniforms.thr.value = P.bloomThreshold; renderer.setRenderTarget(bloomA); renderer.render(quadScene, paintCam);
     quad.material = blurMat;
     for (const [src, dst, dx, dy] of [[bloomA, bloomB, 1, 0], [bloomB, bloomA, 0, 1], [bloomA, bloomB, 2.5, 0], [bloomB, bloomA, 0, 2.5]]) {
-      blurMat.uniforms.tCol.value = src.texture; blurMat.uniforms.dir.value.set(dx / QW, dy / QH); renderer.setRenderTarget(dst); renderer.render(quadScene, paintCam);
+      blurMat.uniforms.tCol.value = src.texture; blurMat.uniforms.dir.value.set(dx / bloomA.width, dy / bloomA.height); renderer.setRenderTarget(dst); renderer.render(quadScene, paintCam);
     }
   }
   const pp = [camera.projectionMatrix.elements[0], camera.projectionMatrix.elements[5]];
   if (P.ink > 0) {
     for (const m of [normMat, inkMat]) { m.uniforms.nearFar.value.set(camera.near, camera.far); m.uniforms.pp.value.set(...pp); }
-    const iu = inkMat.uniforms; iu.wNear.value = P.inkWidth[0]; iu.wFar.value = P.inkWidth[1];
+    const iu = inkMat.uniforms; iu.wNear.value = P.inkWidth[0] * s; iu.wFar.value = P.inkWidth[1] * s;
     iu.creaseOn.value = P.inkCrease ? 1 : 0; if (P.inkCrease) { iu.cosLo.value = Math.cos(P.inkCrease[0] * DEG); iu.cosHi.value = Math.cos(P.inkCrease[1] * DEG); }
     iu.fade.value.set(...P.inkFade); iu.depthLo.value = P.inkJump[0]; iu.depthHi.value = P.inkJump[1];
     iu.idOn.value = P.inkId > 0 ? 1 : 0; iu.idScale.value = P.inkId || 0.6;
@@ -308,10 +339,10 @@ export function renderStage(stage) {
   }
   renderer.setRenderTarget(null);
   const u = paintMat.uniforms;
-  { const D = stage._dof; u.dof.value.set(D ? D.cInf : 0, D ? D.focus : 10, D?.max ?? 24); }
+  { const D = stage._dof; u.dof.value.set(D ? D.cInf * s : 0, D ? D.focus : 10, (D?.max ?? 24) * s); }
   u.ink.value = P.ink; u.inkCol.value.set(P.inkColor); u.vig.value.set(...P.vignette); u.tintS.value.set(...P.tintShadow); u.tintH.value.set(...P.tintHigh);
   u.sat.value = P.sat; u.bright.value = P.bright; u.contrast.value = P.contrast; u.grain.value = P.grain; u.detail.value = P.radius > 0 ? P.detail : 1;
-  u.bloom.value = P.bloom; u.ao.value = P.ao; u.aoR.value = P.aoRadius; u.focal.value = 0.5 * H * camera.projectionMatrix.elements[5];
+  u.bloom.value = P.bloom; u.ao.value = P.ao; u.aoR.value = P.aoRadius; u.focal.value = 0.5 * RH * camera.projectionMatrix.elements[5];
   u.haze.value.set(...P.haze); u.hazeCol.value.set(P.hazeColor ?? (scene.fog ? scene.fog.color.getHex() : 0xbfd8ee));
   u.nearFar.value.set(camera.near, camera.far);
   renderer.clear(); renderer.render(paintScene, paintCam);
