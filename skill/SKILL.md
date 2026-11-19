@@ -142,7 +142,8 @@ non-commercial only (BreezeBlue license) — say so if the user asks about publi
 
 **Performance log.** Xem > Nhật ký hiệu năng: one session per studio page load (preview fps, frame times p50/p90/p99,
 slow and janky frames, CPU per frame, preview level, long tasks, memory, machine) and every render (render fps,
-ms/frame, x realtime), in `Logs/perf/` (per machine, not in git), with CSV / JSON downloads.
+ms/frame, x realtime), in `Logs/perf/` (per machine, not in git), with CSV / JSON downloads. Dashboard page:
+http://localhost:5200/perf.html (totals, trend per session, filters by time / machine / project, refreshes itself).
 
 ## Driving the open studio (built-in browser at http://localhost:5200)
 `studio.open(name)`, `studio.doc`, `studio.seek(t)`, `studio.select(id)`, `studio.key(id, prop, t, value)`,

@@ -3,33 +3,10 @@
 // Logs/perf/sessions/<id>.json through the studio back end, every few seconds and when the page closes.
 // Video renders (Xuất video) are logged by the back end against the session that started them.
 import { renderer } from 'engine/core.js';
+import { BUCKET, NB, summary, type PerfSession } from './perfStats';
+export { summary };
+export type { PerfSession, PerfSample, PerfEvent } from './perfStats';
 
-export interface PerfSample { t: number; fps: number; ms: number; p90: number; cpu: number; lvl: number; w: number; h: number; heap: number | null; play: boolean }
-export interface PerfEvent { t: number; kind: string; text: string }
-export interface PerfSession {
-  id: string; started: string; ended: string; seconds: number;
-  machine: { gpu: string; vendor: string; cores: number | null; memoryGB: number | null; dpr: number; screen: string; refreshHz: number; browser: string; platform: string };
-  projects: string[];
-  totals: {
-    frames: number;            // frames drawn while something moved (playing, scrubbing, dragging)
-    movingSeconds: number;     // time spent moving
-    playSeconds: number;       // of which playing
-    stills: number;            // single frames drawn (a click, a change)
-    slow: number;              // moving frames slower than 33 ms (under 30 a second)
-    jank: number;              // moving frames slower than 50 ms (a visible stutter)
-    cpuMs: number;             // sum of CPU time to draw the moving frames
-    stillCpuMs: number;
-    longTasks: number; longTaskMs: number;   // page busy over 50 ms at a time (UI freezes)
-    levelSeconds: number[];    // time moving at each preview level (0 = sharpest)
-    levelChanges: number;
-    heapMaxMB: number | null;
-  };
-  hist: number[];              // moving frame times: count per 2 ms (last bucket = 200 ms or more)
-  samples: PerfSample[];       // one a second while moving
-  events: PerfEvent[];
-}
-
-const BUCKET = 2, NB = 101;
 const now = () => performance.now();
 const pad = (n: number) => String(n).padStart(2, '0');
 function newId() { const d = new Date(); return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}-${Math.random().toString(36).slice(2, 6)}`; }
@@ -118,17 +95,3 @@ setInterval(save, 15000);
 setInterval(() => { const h = heapMB(); if (h != null && h > (session.totals.heapMaxMB || 0)) { session.totals.heapMaxMB = h; dirty = true; } }, 5000);
 window.addEventListener('pagehide', () => { if (sec.n) flushSecond(); navigator.sendBeacon(`/api/perf?id=${session.id}`, new Blob([JSON.stringify(snapshot())], { type: 'application/json' })); });
 event('start', `Mở studio (${session.machine.gpu})`);
-
-/** Summary numbers of a session (also used for the table and the CSV). */
-export function summary(s: PerfSession) {
-  const T = s.totals, n = s.hist.reduce((a, b) => a + b, 0);
-  const pct = (q: number) => { if (!n) return null; let c = 0; for (let i = 0; i < s.hist.length; i++) { c += s.hist[i]; if (c >= q * n) return (i + 0.5) * BUCKET; } return null; };
-  const lvl = T.levelSeconds.indexOf(Math.max(...T.levelSeconds));
-  return {
-    fps: T.movingSeconds > 0 ? +(n / T.movingSeconds).toFixed(1) : null,
-    ms50: pct(0.5), ms90: pct(0.9), ms99: pct(0.99),
-    slowPct: n ? +(T.slow / n * 100).toFixed(1) : null, jankPct: n ? +(T.jank / n * 100).toFixed(1) : null,
-    cpu: T.frames ? +(T.cpuMs / T.frames).toFixed(2) : null,
-    level: T.movingSeconds > 0 ? lvl : null,
-  };
-}

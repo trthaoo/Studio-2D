@@ -16,6 +16,7 @@ import { addFx } from './vfxEditor';
 import { setWorkspace } from './workspaces';
 import { startRender } from './exportPanel';
 import { showPerf } from './perfPanel';
+import { session as perfSession } from '../perf';
 
 const hier = document.querySelector('#hierarchy .body')!;
 const lib = document.querySelector('#library .body')!;
@@ -159,7 +160,8 @@ function renderMenu() {
       { label: 'Nhìn tự do quanh sân khấu (V)', checked: S.view === 'free', action: () => setView('free') },
       { label: 'Vừa timeline', action: fit },
       { sep: true, label: '' },
-      { label: 'Nhật ký hiệu năng...', action: showPerf },
+      { label: 'Nhật ký hiệu năng...', action: () => showPerf(perfSession, (m) => toast(m)) },
+      { label: 'Dashboard hiệu năng (tab mới)', action: () => window.open('/perf.html', '_blank') },
     ]),
     menuButton('Claude', () => [
       { label: 'Copy lời nhắn cho Claude (project này)', action: copyBrief },

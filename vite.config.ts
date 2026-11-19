@@ -264,6 +264,6 @@ export default defineConfig({
   root: ROOT,
   resolve: { alias: { engine: path.join(ROOT, 'engine') } },
   server: { port: PORT, strictPort: true, watch: { ignored: ['**/Exports/**', '**/vendor/**', '**/Projects/**/audio/**', '**/Projects/**/ref/**', '**/Library/Removed/**'] } },
-  build: { rollupOptions: { input: { main: path.join(ROOT, 'index.html'), render: path.join(ROOT, 'render.html') } } },
+  build: { rollupOptions: { input: { main: path.join(ROOT, 'index.html'), render: path.join(ROOT, 'render.html'), perf: path.join(ROOT, 'perf.html') } } },
   plugins: [studioApi()],
 });
