@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2D Studio</title>
+<link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+<div id="app">
+  <header id="menubar"></header>
+  <div id="work">
+    <aside id="left">
+      <section id="hierarchy" class="panel"><h2>Trong cảnh</h2><div class="body"></div></section>
+      <section id="library" class="panel"><h2>Thư viện</h2><div class="body"></div></section>
+    </aside>
+    <main id="center">
+      <nav id="wstabs"></nav>
+      <div id="viewwrap"><canvas id="view"></canvas><div id="viewmsg"></div></div>
+      <div id="wspanel" hidden></div>
+    </main>
+    <aside id="right"><section id="inspector" class="panel"><h2>Chỉnh sửa</h2><div class="body"></div></section></aside>
+  </div>
+  <section id="timeline">
+    <div id="tlbar"></div>
+    <canvas id="tl"></canvas>
+  </section>
+</div>
+<div id="start" hidden></div>
+<div id="toast"></div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

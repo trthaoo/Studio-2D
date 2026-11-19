@@ -1,0 +1,22 @@
+node_modules/
+Exports/
+dist/
+*.bak
+# the original skill repo (reference only; the studio's copy is engine/): github.com/codewithsiddique-04/3d-video-studio
+vendor/3d-video-studio/
+
+# secrets: never commit keys (the studio keeps them in ~/.2d-studio/ai.json, outside the project)
+.env
+.env.*
+ai.json
+*.key
+*.pem
+
+# per-machine Claude settings
+.claude/settings.local.json
+
+# reference videos downloaded for cloning (large, and not ours to redistribute)
+Projects/*/ref/
+
+# deleted library items
+Library/Removed/

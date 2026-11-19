@@ -1,0 +1,6 @@
+{
+ "name": "Sếp",
+ "params": { "role": "agent", "R": 0.21, "shirt": "#1f2a44", "hair": "#1c1c24", "hair2": "#3a3a48", "style": "bun", "build": "tall", "outfit": "suit", "acc": ["glasses"], "glasses": true },
+ "tracks": {},
+ "savedFrom": "Demo office"
+}

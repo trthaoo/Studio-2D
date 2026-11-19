@@ -1,0 +1,20 @@
+{
+ "name": "giang hồ",
+ "params": {
+  "R": 0.192,
+  "style": "bald",
+  "hair": "#2a1a10",
+  "hair2": "#40281a",
+  "build": "tall",
+  "outfit": "plain",
+  "shirt": "#332a24",
+  "pants": "#2b2f3a",
+  "acc": [
+   "sunglasses"
+  ],
+  "girth": 1.019,
+  "legs": 1.01
+ },
+ "tracks": {},
+ "savedFrom": "Demo office"
+}
