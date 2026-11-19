@@ -130,6 +130,20 @@ The user presses **Render Video** (or File > Render video + layers). Or: `node s
 with the studio running. Out: `Exports/<name>/<name>.mp4`; with layers, `Exports/<name>/layers/`: `00_background.mp4`,
 one ProRes 4444 `.mov` with alpha per character / car / prop, `99_captions.mov`, `manifest.json`.
 
+**Voices (Breeze TTS 2).** A character's lines (`say` keys) can be spoken by Breeze TTS 2, which runs as its own server
+(Linux + NVIDIA GPU 12 GB+: `python -m breeze_infer.api BreezeBlue/breeze-tts-2 --host 0.0.0.0 --port 7860`); the
+studio only stores its address (`~/.2d-studio/tts.json` or `BREEZE_TTS_URL`). Voice per character in
+`params.voice`: `{ instruction: "English description of the voice", ref: "audio/x.wav", refText: "exact words in ref",
+seed, cfg }` (no voice = a default description and a seed from the id). Making voices (Mặt tab, or "Tạo giọng ... trước
+khi xuất" in Xuất video) writes `audio/tts/<hash>.wav`, adds `audio` clips `{ id: "tts_<char>_<ms>", tts: "<char id>" }`
+at each line's time (replacing that character's old ones) and sets each key's `d` to the speech length (lip-sync).
+Same words + same voice = cached, no new request. English and Chinese only; self-hosted output is research /
+non-commercial only (BreezeBlue license) — say so if the user asks about publishing.
+
+**Performance log.** Xem > Nhật ký hiệu năng: one session per studio page load (preview fps, frame times p50/p90/p99,
+slow and janky frames, CPU per frame, preview level, long tasks, memory, machine) and every render (render fps,
+ms/frame, x realtime), in `Logs/perf/` (per machine, not in git), with CSV / JSON downloads.
+
 ## Driving the open studio (built-in browser at http://localhost:5200)
 `studio.open(name)`, `studio.doc`, `studio.seek(t)`, `studio.select(id)`, `studio.key(id, prop, t, value)`,
 `studio.value(id, prop, t)`, `studio.setDoc(doc)`, `studio.save()`, `studio.frame(t)`, `studio.errors()`,

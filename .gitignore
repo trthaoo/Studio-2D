@@ -18,5 +18,8 @@ ai.json
 # reference videos downloaded for cloning (large, and not ours to redistribute)
 Projects/*/ref/
 
+# performance logs (per machine; export from the studio to share)
+Logs/
+
 # deleted library items
 Library/Removed/

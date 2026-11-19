@@ -1,6 +1,8 @@
 // Workspace "Xuất video": cài đặt (cả video hay một đoạn, có tách layer không), tiến độ, và các file đã xuất để xem lại.
 import { S, save, toast, snapT } from '../state';
 import { h, fmtTime } from './dom';
+import { session as perfSession } from '../perf';
+import { makeVoices, speakers, ttsSetup, LICENSE_NOTE } from './voice';
 
 let root: HTMLElement | null = null, layers = false, range: 'all' | 'part' = 'all', from = 0, to = 0, playing = '';
 let job: any = null, timer = 0;
@@ -14,10 +16,15 @@ async function poll() {
   await render();
   if (job?.state === 'running') timer = window.setTimeout(poll, 1000);
 }
+let voices = (() => { try { return localStorage.getItem('2ds.ttsOnRender') === '1'; } catch { return false; } })();
+let setupEl: HTMLElement | null = null;   // kept between redraws (it asks the server once)
 export async function startRender(withLayers = layers, part = range === 'part') {
   if (!S.project) return;
+  if (voices && speakers().length) {   // speech for every line first (Breeze TTS); lines already made come from the cache
+    if (!(await makeVoices(speakers(), true))) { toast('Chưa xuất: tạo giọng đọc không được. Bỏ chọn "Tạo giọng đọc" để xuất không có giọng.', 7000); return; }
+  }
   await save();
-  const q = new URLSearchParams({ name: S.project, layers: withLayers ? '1' : '0' });
+  const q = new URLSearchParams({ name: S.project, layers: withLayers ? '1' : '0', session: perfSession.id });
   if (part) { q.set('from', String(from)); q.set('to', String(to)); }
   const r = await fetch(`/api/render?${q}`, { method: 'POST' });
   const j = await r.json(); if (!r.ok) { toast(j.error || 'Không bắt đầu xuất được'); return; }
@@ -55,6 +62,12 @@ async function render() {
         h('section', { class: 'wsec' }, h('div', { class: 'wsec-h' }, 'Tách layer'),
           h('label', { class: 'radio' }, h('input', { type: 'checkbox', checked: layers, onchange: (e: any) => { layers = e.target.checked; } }), 'Tách mỗi nhân vật, xe, đồ vật ra một file riêng có nền trong suốt'),
           h('div', { class: 'hint' }, 'Ra thêm thư mục layers: nền (00_background.mp4), mỗi object một file .mov ProRes 4444 có alpha, phụ đề riêng, và manifest.json. Ghép chồng lại được đúng video gốc. Chậm hơn xuất thường vài lần.')),
+        h('section', { class: 'wsec' }, h('div', { class: 'wsec-h' }, 'Giọng đọc (Breeze TTS)'),
+          h('label', { class: 'radio' }, h('input', { type: 'checkbox', checked: voices, onchange: (e: any) => { voices = e.target.checked; try { localStorage.setItem('2ds.ttsOnRender', voices ? '1' : '0'); } catch { /* private window */ } } }),
+            `Tạo giọng cho mọi câu thoại trước khi xuất (${speakers().reduce((a, o) => a + (o.tracks.say || []).filter((k) => String(k.v || '').trim()).length, 0)} câu)`),
+          h('div', { class: 'hint' }, 'Mỗi nhân vật dùng giọng chọn ở thẻ Mặt. Câu nào không đổi thì dùng lại giọng đã tạo, không gọi máy chủ lại. Giọng nằm trên hàng Âm thanh, sửa được như mọi đoạn âm thanh khác.'),
+          setupEl ||= ttsSetup(),
+          h('div', { class: 'hint' }, LICENSE_NOTE)),
         h('section', { class: 'wsec' },
           running ? h('div', {}, h('div', { class: 'pbar' }, h('div', { style: { width: pct + '%' } })), h('div', { class: 'hint' }, `Đang xuất ${job.layers ? 'kèm layer ' : ''}${job.progress}`), h('button', { onclick: () => fetch('/api/render', { method: 'DELETE' }).then(poll) }, 'Dừng'))
             : h('button', { class: 'primary big', disabled: !S.project, onclick: () => startRender() }, layers ? 'Xuất video và layer' : 'Xuất video'),

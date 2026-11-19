@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
 import { aiStatus, aiText, saveKey, findCli } from './scripts/ai';
+import { ttsStatus, ttsLine, saveTtsUrl } from './scripts/tts';
 
 const ROOT = __dirname;
 const PROJECTS = path.join(ROOT, 'Projects');
@@ -20,7 +21,23 @@ function body(req: any): Promise<Buffer> {
 function json(res: any, data: unknown, code = 200) { res.statusCode = code; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(data)); }
 const hash = (s: string | Buffer) => crypto.createHash('sha1').update(s).digest('hex');
 
-interface Job { id: string; kind: 'render' | 'ref'; project: string; layers: boolean; state: 'running' | 'done' | 'error'; progress: string; log: string[]; out?: string; proc?: ChildProcess; started: number }
+interface Job { id: string; kind: 'render' | 'ref'; project: string; layers: boolean; state: 'running' | 'done' | 'error'; progress: string; log: string[]; out?: string; proc?: ChildProcess; started: number;
+  session?: string; frames?: number; fps?: number; layerCount?: number; loopStart?: number; loopSeconds?: number; from?: number; to?: number }
+
+// performance log (src/perf.ts): one JSON per studio session, one line per video render. Per machine, not in git.
+const PERF = path.join(ROOT, 'Logs', 'perf'), PERF_SESSIONS = path.join(PERF, 'sessions'), PERF_RENDERS = path.join(PERF, 'renders.jsonl');
+const perfId = (s: string | null) => (s && /^[0-9]{8}-[0-9]{6}-[a-z0-9]{1,8}$/.test(s) ? s : '');
+function logRender(job: Job) {
+  if (job.kind !== 'render') return;
+  const total = (Date.now() - job.started) / 1000, done = Number((job.progress.match(/^(\d+)\//) || [])[1] || 0);
+  const rec = { at: new Date(job.started).toISOString(), session: job.session || '', project: job.project, state: job.state, layers: job.layers, layerCount: job.layerCount ?? null,
+    frames: job.frames ?? null, framesDone: done, videoFps: job.fps ?? null, from: job.from ?? null, to: job.to ?? null, width: 1080, height: 1920,
+    loopSeconds: job.loopSeconds ?? null, totalSeconds: +total.toFixed(1),
+    renderFps: job.loopSeconds && done ? +(done / job.loopSeconds).toFixed(2) : null,          // frames drawn + encoded a second
+    msPerFrame: job.loopSeconds && done ? +(job.loopSeconds * 1000 / done).toFixed(1) : null,
+    realtime: job.loopSeconds && done && job.fps ? +((done / job.fps) / total).toFixed(3) : null };   // seconds of video per second of waiting
+  try { fs.mkdirSync(PERF, { recursive: true }); fs.appendFileSync(PERF_RENDERS, JSON.stringify(rec) + '\n'); } catch { /* logging must never break a render */ }
+}
 
 function studioApi(): Plugin {
   const written = new Map<string, string>();   // file -> hash of what the studio itself saved (so we don't echo our own saves)
@@ -31,9 +48,14 @@ function studioApi(): Plugin {
       /** Run a node script as a job: PROGRESS / OUT lines from its output, a ws event when it ends. */
       const runJob = (job: Job, args: string[]) => {
         job.proc = spawn(process.execPath, args, { cwd: ROOT });
-        const onLine = (s: string) => { for (const l of s.split(/\r?\n/).filter(Boolean)) { job.log.push(l); if (job.log.length > 400) job.log.shift(); if (l.startsWith('PROGRESS ')) job.progress = l.slice(9); if (l.startsWith('OUT ')) job.out = l.slice(4); } };
+        const onLine = (s: string) => { for (const l of s.split(/\r?\n/).filter(Boolean)) {
+          job.log.push(l); if (job.log.length > 400) job.log.shift();
+          if (l.startsWith('PROGRESS ')) { job.progress = l.slice(9); if (job.loopStart) job.loopSeconds = +((Date.now() - job.loopStart) / 1000).toFixed(2); }
+          if (l.startsWith('OUT ')) job.out = l.slice(4);
+          const m = l.match(/^Rendering ".*" (\d+) frames at ([\d.]+) fps(?:, (\d+) layers)?/); if (m) { job.frames = +m[1]; job.fps = +m[2]; job.layerCount = m[3] ? +m[3] : undefined; job.loopStart = Date.now(); }
+        } };
         job.proc.stdout!.on('data', (d) => onLine(d.toString())); job.proc.stderr!.on('data', (d) => onLine(d.toString()));
-        job.proc.on('close', (code) => { job.state = code === 0 ? 'done' : 'error'; job.proc = undefined; server.ws.send({ type: 'custom', event: job.kind === 'ref' ? 'ref-done' : 'render-done', data: { id: job.id, state: job.state, out: job.out, project: job.project } }); });
+        job.proc.on('close', (code) => { job.state = code === 0 ? 'done' : 'error'; job.proc = undefined; logRender(job); server.ws.send({ type: 'custom', event: job.kind === 'ref' ? 'ref-done' : 'render-done', data: { id: job.id, state: job.state, out: job.out, project: job.project } }); });
         jobs.push(job);
       };
       fs.mkdirSync(PROJECTS, { recursive: true }); fs.mkdirSync(EXPORTS, { recursive: true });
@@ -61,7 +83,7 @@ function studioApi(): Plugin {
         if (!url.pathname.startsWith('/api/')) return next();
         // AI routes spend money with a saved key: only the studio page itself may call them (no other website, no
         // other machine). A custom header forces a CORS preflight, which other origins cannot pass.
-        if (url.pathname.startsWith('/api/ai/')) {
+        if (url.pathname.startsWith('/api/ai/') || url.pathname.startsWith('/api/tts/')) {   // tts: uses a GPU server, and its address is ours to set
           const origin = String(req.headers.origin || ''), local = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\]):\d+$/;
           const addr = String(req.socket?.remoteAddress || '');
           if ((origin && !local.test(origin)) || req.headers['x-2d-studio'] !== '1' || !/^(::1|127\.0\.0\.1|::ffff:127\.0\.0\.1)$/.test(addr)) return json(res, { error: 'forbidden' }, 403);
@@ -120,11 +142,12 @@ function studioApi(): Plugin {
             case 'POST /api/render': {
               const layers = url.searchParams.get('layers') === '1';
               if (jobs.some((j) => j.state === 'running' && j.kind === 'render')) return json(res, { error: 'Đang xuất một video khác.' }, 409);
-              const job: Job = { id: Date.now().toString(36), kind: 'render', project: name, layers, state: 'running', progress: 'starting', log: [], started: Date.now() };
+              const job: Job = { id: Date.now().toString(36), kind: 'render', project: name, layers, state: 'running', progress: 'starting', log: [], started: Date.now(), session: perfId(url.searchParams.get('session')) };
               const args = [path.join(ROOT, 'scripts', 'render.mjs'), name, '--port', String(server.config.server.port || PORT)];
               if (layers) args.push('--layers');
               const from = url.searchParams.get('from'), to = url.searchParams.get('to');
               if (from) args.push('--from', from); if (to) args.push('--to', to);
+              if (from) job.from = +from; if (to) job.to = +to;
               runJob(job, args); return json(res, { id: job.id });
             }
             case 'GET /api/render': {
@@ -133,6 +156,40 @@ function studioApi(): Plugin {
             }
             case 'DELETE /api/render': {
               const j = jobs.find((q) => q.state === 'running' && q.kind === 'render'); if (j?.proc) j.proc.kill(); return json(res, { ok: true });
+            }
+            // ---- Breeze TTS (scripts/tts.ts)
+            case 'GET /api/tts/status': return json(res, await ttsStatus());
+            case 'PUT /api/tts/config': {
+              try { saveTtsUrl(String(JSON.parse((await body(req)).toString('utf8')).url || '')); } catch (e: any) { return json(res, { error: e.message }, 400); }
+              return json(res, await ttsStatus());
+            }
+            case 'POST /api/tts/line': {   // ?name=<project>, body { text, instruction, ref, refText, seed, cfg }
+              if (!name || !fs.existsSync(dir)) return json(res, { error: 'no such project' }, 404);
+              try { return json(res, await ttsLine(dir, JSON.parse((await body(req)).toString('utf8')))); }
+              catch (e: any) { return json(res, { error: e.message }, 502); }
+            }
+            // ---- performance log
+            case 'PUT /api/perf':
+            case 'POST /api/perf': {   // the studio saves its session (POST: sendBeacon when the page closes)
+              const id = perfId(url.searchParams.get('id')); if (!id) return json(res, { error: 'id' }, 400);
+              const buf = await body(req); if (buf.length > 8e6) return json(res, { error: 'too big' }, 413);
+              const j = JSON.parse(buf.toString('utf8')); if (j.id !== id) return json(res, { error: 'id' }, 400);
+              fs.mkdirSync(PERF_SESSIONS, { recursive: true }); fs.writeFileSync(path.join(PERF_SESSIONS, id + '.json'), buf);
+              return json(res, { ok: true });
+            }
+            case 'GET /api/perf': {   // ?id= one whole session; without: every session (no samples) and every render
+              const id = perfId(url.searchParams.get('id'));
+              if (id) { const f = path.join(PERF_SESSIONS, id + '.json'); if (!fs.existsSync(f)) return json(res, { error: 'not found' }, 404); res.setHeader('Content-Type', 'application/json'); return res.end(fs.readFileSync(f)); }
+              const sessions = fs.existsSync(PERF_SESSIONS) ? fs.readdirSync(PERF_SESSIONS).filter((f) => f.endsWith('.json')).map((f) => {
+                try { const { samples, ...rest } = JSON.parse(fs.readFileSync(path.join(PERF_SESSIONS, f), 'utf8')); return { ...rest, sampleCount: (samples || []).length }; } catch { return null; }
+              }).filter(Boolean).sort((a: any, b: any) => (a.started < b.started ? 1 : -1)) : [];
+              const renders = fs.existsSync(PERF_RENDERS) ? fs.readFileSync(PERF_RENDERS, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean).reverse() : [];
+              return json(res, { sessions, renders });
+            }
+            case 'DELETE /api/perf': {   // one session, or ?all=1 everything
+              if (url.searchParams.get('all') === '1') { fs.rmSync(PERF, { recursive: true, force: true }); return json(res, { ok: true }); }
+              const id = perfId(url.searchParams.get('id')); if (!id) return json(res, { error: 'id' }, 400);
+              fs.rmSync(path.join(PERF_SESSIONS, id + '.json'), { force: true }); return json(res, { ok: true });
             }
             case 'GET /api/library': {   // everything in Library/, with file contents
               const out: Record<string, any[]> = {};

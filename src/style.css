@@ -107,7 +107,7 @@ body[data-ws=script] #timeline, body[data-ws=library] #timeline, body[data-ws=ex
 .vtool .kbd { font-size: .77rem; color: var(--dim2); border: 1px solid var(--line2); border-radius: 3px; padding: 0 4px; }
 .vlabel { color: var(--dim); font-size: .92rem; padding: 0 6px 0 8px; }
 .vhint { position: absolute; left: 0; right: 0; bottom: 5px; text-align: center; color: #aeb6c3; font-size: .92rem; pointer-events: none; padding: 0 12px; }
-.vperf { position: absolute; top: 10px; left: 10px; z-index: 5; display: flex; align-items: center; gap: 8px; }
+.vperf { position: absolute; top: 46px; left: 10px; z-index: 5; display: flex; align-items: center; gap: 8px; }
 .vperf-sel { font-size: .82rem; padding: 2px 4px; background: rgba(22,24,29,.94); color: #aeb6c3; border: 1px solid var(--line2); border-radius: 4px; }
 .vperf-fps { font-size: .82rem; color: #8fa0b5; pointer-events: none; font-variant-numeric: tabular-nums; }
 .vmode { position: absolute; top: 12px; right: 12px; font-size: .85rem; padding: 3px 8px; border-radius: 3px; z-index: 5; pointer-events: none; border: 1px solid; }
@@ -243,6 +243,41 @@ textarea.code { font: .92rem/1.5 Consolas, "Cascadia Mono", monospace; backgroun
 .modal .title { font-weight: 600; font-size: 1.08rem; }
 .modal .row { justify-content: flex-end; margin: 0; }
 .modal.help { width: min(640px, 94vw); }
+/* Giọng đọc (Breeze TTS) */
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 6px 0; }
+.tts-setup { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
+.tts-setup input[type=text] { grid-column: span 2; min-width: 0; }
+.hint.ok { color: #7fcf9a; }
+.hint.warn { color: #e0b46a; }
+/* Nhật ký hiệu năng */
+.modal.perf { width: min(1180px, 96vw); max-height: 92vh; overflow: auto; gap: 8px; }
+.modal.perf h3 { margin: 8px 0 2px; font-size: .95rem; color: #c9d1dc; }
+.perf-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.perf-head .grow { flex: 1; }
+.perf-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.perf-tile { background: #1a1d23; border: 1px solid var(--line2); border-radius: 5px; padding: 6px 8px; }
+.perf-tile .pl, .perf-charts .pl { font-size: .78rem; color: #8f99a8; }
+.perf-tile .pv { font-size: 1.25rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.perf-tile .ps { font-size: .74rem; color: #7d8696; }
+.perf-tile.good .pv, .perf-table td.good { color: #6fd39a; }
+.perf-tile.mid .pv, .perf-table td.mid { color: #e0c25a; }
+.perf-tile.bad .pv, .perf-table td.bad { color: #ef7a6e; }
+.perf-scroll { overflow: auto; max-height: 260px; border: 1px solid var(--line2); border-radius: 4px; }
+.perf-table { border-collapse: collapse; width: 100%; font-size: .8rem; }
+.perf-table th { position: sticky; top: 0; background: #2a2f38; text-align: left; padding: 4px 6px; font-weight: 600; white-space: nowrap; }
+.perf-table td { padding: 3px 6px; border-top: 1px solid #2c313a; white-space: nowrap; }
+.perf-table td.n { text-align: right; font-variant-numeric: tabular-nums; }
+.perf-table td.gpu { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.perf-table tbody tr { cursor: pointer; }
+.perf-table tbody tr:hover { background: #262b33; }
+.perf-table tbody tr.on { background: #2d3a4d; }
+.perf-machine { font-size: .8rem; color: #aeb6c3; }
+.perf-charts { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; }
+.perf-chart { width: 100%; height: 150px; display: block; border-radius: 4px; }
+.perf-levels { display: flex; flex-wrap: wrap; gap: 12px; font-size: .78rem; color: #aeb6c3; }
+.perf-levels i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; border-radius: 2px; vertical-align: -1px; }
+.perf-events { max-height: 160px; overflow: auto; font-size: .78rem; color: #aeb6c3; }
+.perf-events b { color: #8f99a8; font-weight: 500; }
 .hstep { display: grid; grid-template-columns: 26px 1fr; gap: 10px; align-items: start; }
 .hstep .hn { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--accent); color: var(--accent); display: grid; place-items: center; font-size: .92rem; }
 #start { position: fixed; inset: 0; background: rgba(12,13,16,.97); z-index: 40; display: grid; place-items: center; }

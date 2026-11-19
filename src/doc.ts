@@ -23,7 +23,7 @@ export interface SceneObject {
 export interface Stage { id: string; name: string; mood: 'day' | 'dusk' | 'night' | 'rain'; paint?: Record<string, any>; lightPreset?: string; light?: Record<string, any>; look?: string }
 export interface Cut { t: number; camera: string; dissolve?: number }   // dissolve: frames (5..18)
 export interface Caption { t: number; text: string }
-export interface AudioClip { id: string; file: string; start: number; gain?: number; name?: string }
+export interface AudioClip { id: string; file: string; start: number; gain?: number; name?: string; tts?: string }   // tts: id of the character whose line this is (made by Breeze TTS, replaced when made again)
 
 export interface SceneDoc {
   version: 1;

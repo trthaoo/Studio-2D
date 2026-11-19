@@ -7,6 +7,7 @@ import { applyValue, valueAt, activeCut, JOINTS, JOINT_VI, Joint, Vec3, SceneObj
 import { audioPlay, audioPause, audioSync } from './audio';
 import { h } from './dom';
 import { setQuality, QUALITY, RW, RH } from 'engine/core.js';
+import * as perf from '../perf';
 
 export const rt = new Runtime();
 const cv = document.getElementById('view') as HTMLCanvasElement;
@@ -127,8 +128,9 @@ export function perfInfo() { return { mode: qMode, level, fps: Math.round(fps), 
 const perfSel = h('select', { class: 'vperf-sel', title: 'Chất lượng xem trước. Chỉ ảnh hưởng khung xem trong studio, video xuất ra luôn ở chất lượng đầy đủ.' },
   ...(Object.keys(Q_VI) as QMode[]).map((m) => h('option', { value: m, selected: m === qMode }, 'Xem trước: ' + Q_VI[m]))) as HTMLSelectElement;
 const perfFps = h('span', { class: 'vperf-fps' });
-perfSel.onchange = () => { qMode = perfSel.value as QMode; try { localStorage.setItem('2ds.quality', qMode); } catch { /* private window */ } level = qMode === 'auto' ? 1 : FIXED[qMode]; holdUp = 0; drewStill = false; redraw(); };
+perfSel.onchange = () => { qMode = perfSel.value as QMode; perf.event('mode', 'Xem trước: ' + Q_VI[qMode]); try { localStorage.setItem('2ds.quality', qMode); } catch { /* private window */ } level = qMode === 'auto' ? 1 : FIXED[qMode]; holdUp = 0; drewStill = false; redraw(); };
 wrap.append(h('div', { class: 'vperf' }, perfSel, perfFps));
+perf.event('mode', 'Xem trước: ' + Q_VI[qMode]);
 
 // ---------------------------------------------------------------- drawing
 let lastTs = 0;
@@ -147,12 +149,14 @@ function loop(ts: number) {
     return;
   }
   need = false;
-  const still = qMode === 'auto' ? !moving : true;
-  useLevel(qMode === 'auto' ? (still ? 0 : level) : FIXED[qMode]);
+  const still = qMode === 'auto' ? !moving : true, usedLevel = qMode === 'auto' ? (still ? 0 : level) : FIXED[qMode];
+  useLevel(usedLevel);
   if (moving && lastDraw && ts - lastDraw < 250) measure(ts, ts - lastDraw);
   if (!moving) { fpsN = 0; fpsT = ts; perfFps.textContent = ''; }
   else if (++fpsN && ts - fpsT > 500) { fps = (fpsN - 1) * 1000 / (ts - fpsT); fpsN = 1; fpsT = ts; perfFps.textContent = `${Math.round(fps)} khung/giây`; }
+  const since = lastDraw ? ts - lastDraw : 0;
   lastDraw = ts; drewStill = still;
+  const c0 = performance.now();
   try {
     rt.draw(S.t, { captions: true });
     msg.textContent = rt.errors.length ? 'Lỗi: ' + rt.errors.join(' · ') : '';
@@ -163,6 +167,7 @@ function loop(ts: number) {
   ctx.save(); ctx.beginPath(); ctx.rect(ox - 12, oy - 12, S.doc.width * scale + 24, S.doc.height * scale + 24); ctx.clip();
   overlays();
   ctx.restore();
+  perf.frame({ interval: moving && since < 1000 ? since : 0, cpu: performance.now() - c0, moving, playing: S.playing, level: usedLevel, w: RW, h: RH, vsync });
 }
 requestAnimationFrame(loop);
 on('time', redraw); on('doc', () => { rt.sync(S.doc); layout(); }); on('select', redraw);

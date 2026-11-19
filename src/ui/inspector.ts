@@ -16,6 +16,7 @@ import type { Stage } from '../doc';
 import { FX, FX_NAMES, FX_AT, FX_AT_VI, FX_DEFAULT_AT } from '../vfx';
 import { vfxHeader } from '../library';
 import { openLibrary } from './libraryPanel';
+import { voiceSection } from './voice';
 
 const insp = document.querySelector('#inspector .body')!;
 let sliding = false;   // while a slider is dragged, don't rebuild the panel under the pointer
@@ -125,7 +126,7 @@ function charTab(o: SceneObject, tab: string): any[] {
     ];
   }
   if (tab === 'face') return [
-    choice(o, propDef('char', 'expr')!, EXPR_VI), prop(o, 'say'),
+    choice(o, propDef('char', 'expr')!, EXPR_VI), prop(o, 'say'), voiceSection(o, section),
     section('Chỉnh mặt', ...['face.x', 'face.y', 'eye.size', 'eye.gap', 'eye.y', 'brow.y', 'mouth.y', 'mouth.size'].map((k) => prop(o, k)),
       h('button', { class: 'wide', onclick: () => edit(() => { for (const k of ['face.x', 'face.y', 'eye.size', 'eye.gap', 'eye.y', 'brow.y', 'mouth.y', 'mouth.size']) delete o.tracks[k]; }) }, 'Đặt lại mặt')),
     section('Kính và da (cả video)', pCheck(o, 'Đeo kính cận', () => !!p.glasses, (v) => { if (v) p.glasses = true; else delete p.glasses; }), pColor(o, 'skin', 'Màu da')),

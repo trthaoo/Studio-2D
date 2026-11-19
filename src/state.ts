@@ -1,5 +1,6 @@
 // Studio state: the open document, selection, playhead, undo, saving. UI modules listen with on().
 import { SceneDoc, normalize, emptyDoc } from './doc';
+import { projectOpened } from './perf';
 
 type Ev = 'doc' | 'select' | 'time' | 'play' | 'project' | 'keys' | 'ws';
 export type Workspace = 'script' | 'scene' | 'camera' | 'library' | 'export';
@@ -60,6 +61,7 @@ export async function save() {
   if (r.ok) { S.dirty = false; emit('project'); } else toast('Save failed: ' + (await r.text()));
 }
 export async function openProject(name: string, keepTime = false) {
+  const t0 = performance.now(), fresh = !keepTime || S.project !== name;
   const r = await fetch(`/api/project?name=${encodeURIComponent(name)}`);
   if (!r.ok) { toast('Could not open ' + name); return false; }
   const doc = normalize(await r.json());
@@ -68,6 +70,7 @@ export async function openProject(name: string, keepTime = false) {
   if (!keepTime) { S.t = 0; S.sel = null; }
   fixSel(); localStorage.setItem('2ds.last', name);
   emit('project'); emit('doc'); emit('time');
+  if (fresh) projectOpened(name, performance.now() - t0);   // load + build every object
   return true;
 }
 export async function newProject(name: string, doc?: SceneDoc) {

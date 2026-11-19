@@ -15,6 +15,7 @@ import { FX, FX_NAMES } from '../vfx';
 import { addFx } from './vfxEditor';
 import { setWorkspace } from './workspaces';
 import { startRender } from './exportPanel';
+import { showPerf } from './perfPanel';
 
 const hier = document.querySelector('#hierarchy .body')!;
 const lib = document.querySelector('#library .body')!;
@@ -157,6 +158,8 @@ function renderMenu() {
       { label: 'Khung hình video (C)', checked: S.view === 'camera', action: () => setView('camera') },
       { label: 'Nhìn tự do quanh sân khấu (V)', checked: S.view === 'free', action: () => setView('free') },
       { label: 'Vừa timeline', action: fit },
+      { sep: true, label: '' },
+      { label: 'Nhật ký hiệu năng...', action: showPerf },
     ]),
     menuButton('Claude', () => [
       { label: 'Copy lời nhắn cho Claude (project này)', action: copyBrief },
