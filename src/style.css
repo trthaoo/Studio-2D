@@ -243,6 +243,11 @@ textarea.code { font: .92rem/1.5 Consolas, "Cascadia Mono", monospace; backgroun
 .modal .title { font-weight: 600; font-size: 1.08rem; }
 .modal .row { justify-content: flex-end; margin: 0; }
 .modal.help { width: min(640px, 94vw); }
+/* Cùng một người (nhân vật ở nhiều cảnh) */
+.person { margin: 6px 0 8px; padding: 7px 9px; border-radius: 5px; font-size: .88rem; border: 1px solid; }
+.person .row { margin: 6px 0 0; }
+.person.ok { border-color: #35513d; background: #1d2a22; color: #b9d8c2; }
+.person.warn { border-color: #6a4e22; background: #2a2416; color: #f0d29a; }
 /* Giọng đọc (Breeze TTS) */
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 6px 0; }
 .tts-setup { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }

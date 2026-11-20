@@ -33,13 +33,20 @@ scene.json.
   "stages": [{ "id": "office", "name": "Office", "mood": "day", "lightPreset": "homeWarm", "look": "film" }],   // mood: day | dusk | night | rain (the sky); lighting and shader: see "Lighting and picture style"
   "objects": [ ...SceneObject ],
   "cuts": [{ "t": 0, "camera": "cam1" }, { "t": 2.0, "camera": "cam2", "dissolve": 9 }],   // dissolve: frames (5–18)
-  "captions": [{ "t": 0.6, "text": "Boss," }, { "t": 1.75, "text": "" }],                 // "" clears
+  "captions": [{ "t": 0.6, "text": "Boss," }, { "t": 1.75, "text": "" }],                 // "" clears; 1–3 words a card (a longer card shrinks to fit the width)
   "audio": [{ "id": "vo", "file": "audio/vo.wav", "start": 0, "gain": 0 }],               // files in Projects/<name>/audio/
   "notes": "free text"
 }
 ```
 
 A **stage** is a world of its own (mood, sky, its own sets). Every object belongs to one stage; a camera films its stage.
+
+**One person in several stages = one look.** A character who appears in two stages (Act 1 street, Act 3 yard) needs
+one object per stage. Give the look (build params) to the FIRST one only; every other one gets
+`"params": { "same": "<first id>" }` (plus its own `side` / `autoWalk` / `stride` / `breath` if needed) and no
+`hair.*` `face.*` `eye.*` `brow.*` `mouth.*` `acc.*` tracks: look, part fixes and voice come from the first. Never
+write two different looks for one person. The studio warns on opening a project where same-named characters
+differ, and Sửa > Đồng bộ ngoại hình nhân vật trùng tên links them (the first object's look wins).
 
 ### SceneObject
 ```jsonc

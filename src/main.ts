@@ -7,7 +7,7 @@ import { fullQuality } from 'engine/core.js';
 import { zoom, fit } from './ui/timeline';
 import { showStart, duplicate, deleteSelection, pollRender } from './ui/panels';
 import { onRenderChanged } from './ui/workspaces';
-import { setValue, valueAt, normalize, SceneDoc } from './doc';
+import { setValue, valueAt, normalize, SceneDoc, lookMismatches } from './doc';
 
 await loadFonts();
 await loadLibrary();
@@ -69,7 +69,13 @@ if (import.meta.hot) {
 };
 
 // ---------------------------------------------------------------- start
-on('project', () => { document.title = S.project ? `${S.project} — 2D Studio` : '2D Studio'; });
+const warnedLooks = new Set<string>();
+on('project', () => {
+  document.title = S.project ? `${S.project} — 2D Studio` : '2D Studio';
+  // one person in several stages with different looks (each stage has its own object): say so once on opening
+  const g = lookMismatches(S.doc);
+  if (g.length && !warnedLooks.has(S.project) && warnedLooks.add(S.project)) setTimeout(() => toast(`${g.map((x) => x[0].name.split(/[\s(]/)[0]).join(', ')}: cùng một người ở nhiều cảnh nhưng ngoại hình khác nhau. Sửa > Đồng bộ ngoại hình nhân vật trùng tên.`, 8000), 600);
+});
 const last = localStorage.getItem('2ds.last');
 if (last && (await openProject(last))) { fit(); } else { emit('doc'); showStart(); }
 pollRender();

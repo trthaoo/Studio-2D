@@ -5,7 +5,8 @@ import { Runtime, Part } from '../runtime';
 import { S, on, emit, select, selObj, edit, beginGesture, endGesture, changed, checkpoint, setTime, toast } from '../state';
 import { applyValue, valueAt, activeCut, JOINTS, JOINT_VI, Joint, Vec3, SceneObject } from '../doc';
 import { audioPlay, audioPause, audioSync } from './audio';
-import { h } from './dom';
+import { h, ask, fmtTime } from './dom';
+import { captionBox } from 'engine/captions.js';
 import { setQuality, QUALITY, RW, RH } from 'engine/core.js';
 import * as perf from '../perf';
 
@@ -183,8 +184,35 @@ function project(p: THREE.Vector3): [number, number, boolean] | null {
 
 interface Handle { j: Joint; x: number; y: number; world: THREE.Vector3 }
 let handles: Handle[] = [], hover: Joint | null = null;
+// ---------------------------------------------------------------- captions on the frame
+let capHover = -1;
+const capsNow = () => S.doc.captions.map((c) => [c.t, c.text] as [number, string]);
+/** The caption card under a canvas point (device px), in frame units, or null. */
+function capHit(cx: number, cy: number) {
+  if (!S.doc.captions.length || !rt.doc) return null;
+  const b = captionBox(rt.ctx, capsNow(), S.t); if (!b) return null;
+  const fx = (cx - ox) / scale, fy = (cy - oy) / scale;
+  return fx >= b.x0 && fx <= b.x1 && fy >= b.y0 && fy <= b.y1 ? b : null;
+}
+async function editCaption(i: number) {
+  const c = S.doc.captions[i]; if (!c) return;
+  S.selCap = i; S.selCut = -1; emit('select'); redraw();
+  const s = await ask(`Phụ đề lúc ${fmtTime(c.t, S.doc.fps)} (để trống = tắt phụ đề từ lúc này)`, c.text);
+  if (s != null && s !== c.text) edit(() => { c.text = s; });
+}
+function captionOutline() {
+  const b = capHover >= 0 || S.selCap >= 0 ? captionBox(rt.ctx, capsNow(), S.t) : null;
+  if (!b || (b.index !== capHover && b.index !== S.selCap)) return;
+  const dpr = window.devicePixelRatio || 1;
+  ctx.save(); ctx.setLineDash([5 * dpr, 4 * dpr]); ctx.strokeStyle = b.index === S.selCap ? '#ffb02e' : 'rgba(255,255,255,0.75)'; ctx.lineWidth = 1.5 * dpr;
+  ctx.strokeRect(ox + b.x0 * scale, oy + b.y0 * scale, (b.x1 - b.x0) * scale, (b.y1 - b.y0) * scale);
+  if (b.index === capHover) { ctx.setLineDash([]); ctx.font = `600 ${11 * dpr}px system-ui`; ctx.fillStyle = 'rgba(10,12,16,0.85)'; const s = 'Bấm để sửa phụ đề', tw = ctx.measureText(s).width; ctx.fillRect(ox + (b.x0 + b.x1) / 2 * scale - tw / 2 - 5 * dpr, oy + b.y1 * scale + 4 * dpr, tw + 10 * dpr, 17 * dpr); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText(s, ox + (b.x0 + b.x1) / 2 * scale, oy + b.y1 * scale + 16 * dpr); }
+  ctx.restore();
+}
+
 function overlays() {
   handles = [];
+  captionOutline();
   const o = selObj(); if (!o || o.kind === 'camera') return;
   const dpr = window.devicePixelRatio || 1;
   const b = rt.builtOf(o.id); if (!b || !b.root.visible) return;
@@ -254,6 +282,9 @@ cv.addEventListener('pointerdown', (e) => {
   }
   if (e.button !== 0 || !rt.camera) return;
   const dpr = window.devicePixelRatio || 1;
+  // the caption card on the frame: click to edit its words (it is also selected on the timeline's Phụ đề row)
+  const cap = S.tool !== 'pose' ? capHit(cx, cy) : null;
+  if (cap) { editCaption(cap.index); return; }
   // a joint dot (Tạo dáng)
   const hd = S.tool === 'pose' ? handles.find((q) => Math.hypot(q.x - cx, q.y - cy) < 14 * dpr) : null;
   const o = selObj();
@@ -282,8 +313,9 @@ cv.addEventListener('pointerdown', (e) => {
 });
 
 cv.addEventListener('pointermove', (e) => {
-  if (!drag) {   // hover on joint dots
+  if (!drag) {   // hover on joint dots, or on the caption card
     if (S.tool === 'pose' && handles.length) { const { cx, cy } = ndc(e), dpr = window.devicePixelRatio || 1; const hd = handles.find((q) => Math.hypot(q.x - cx, q.y - cy) < 14 * dpr); const j = hd?.j || null; if (j !== hover) { hover = j; cv.style.cursor = j ? 'grab' : ''; redraw(); } }
+    else { const { cx, cy } = ndc(e), c = S.tool !== 'pose' && !(S.view === 'camera' && (S.ws === 'camera' || e.altKey)) ? capHit(cx, cy) : null, on = c ? c.index : -1; if (on !== capHover) { capHover = on; cv.style.cursor = c ? 'text' : ''; redraw(); } }
     return;
   }
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;

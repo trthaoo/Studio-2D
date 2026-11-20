@@ -1,7 +1,7 @@
 // Inspector (bảng bên phải): sửa thứ đang chọn. Nhân vật có các thẻ theo bộ phận: Vị trí, Dáng & tay, Mặt, Tóc,
 // Quần áo, Phụ kiện. Mỗi thay đổi áp dụng cho cả video, hoặc tạo keyframe tại playhead (công tắc ở trên cùng).
 import { S, on, emit, edit, changed, checkpoint, beginGesture, endGesture, selObj, select, snapT, toast } from '../state';
-import { PROPS, propDef, valueAt, applyValue, isAnimated, SceneObject, PropDef, Vec3, ARMS, ARM_VI, EXPRS, EXPR_VI, POSE_VI, JOINTS, JOINT_VI, setValue, activeCut, newId } from '../doc';
+import { PROPS, propDef, valueAt, applyValue, isAnimated, SceneObject, PropDef, Vec3, ARMS, ARM_VI, EXPRS, EXPR_VI, POSE_VI, JOINTS, JOINT_VI, setValue, activeCut, newId, lookSource, lookParams, lookMismatches, shareLook, LOOK_TRACK } from '../doc';
 import { h, fmtTime, KIND_COLOR } from './dom';
 import { setTool, refreshToolbar, TAB_NAME, viewedCam, rt } from './viewport';
 import { HAIR_STYLES, BUILD_NAMES, OUTFIT_NAMES, ACC_NAMES } from 'engine/chars.js';
@@ -104,10 +104,31 @@ const note = (s: string) => h('div', { class: 'hint' }, s);
 
 // ---------------------------------------------------------------- character part tabs
 const TABS = ['pos', 'pose', 'face', 'hair', 'clothes', 'acc'];
-function charTab(o: SceneObject, tab: string): any[] {
+/** Top of a character's panel: who else is this person (other stages), and fixing two looks of one person. */
+function personBanner(o: SceneObject, look: SceneObject) {
+  const d = S.doc, stageName = (x: SceneObject) => d.stages.find((s) => s.id === x.stage)?.name || x.stage;
+  if (look !== o) return h('div', { class: 'person ok' },
+    h('div', {}, `Cùng một người với "${look.name}" (${stageName(look)}). Ngoại hình và giọng dùng chung: sửa tóc, áo, mặt ở đây là sửa cho mọi cảnh.`),
+    h('div', { class: 'row' }, h('button', { onclick: () => select(look.id) }, `Chọn "${look.name}"`),
+      h('button', { onclick: () => edit(() => { const own = { ...o.params }; delete own.same; o.params = { ...lookParams(d, o), ...own }; for (const [k, v] of Object.entries(look.tracks)) if (LOOK_TRACK.test(k) && !o.tracks[k]) o.tracks[k] = JSON.parse(JSON.stringify(v)); delete o.params.same; }) }, 'Tách ra, ngoại hình riêng')));
+  const group = lookMismatches(d).find((g) => g.includes(o));
+  const others = group ? group.filter((x) => lookSource(d, x).id !== look.id) : [];
+  if (!others.length) return null;
+  return h('div', { class: 'person warn' },
+    h('div', {}, `Ở cảnh khác có ${others.map((x) => `"${x.name}" (${stageName(x)})`).join(', ')} trông như cùng người nhưng ngoại hình khác.`),
+    h('div', { class: 'row' },
+      h('button', { class: 'primary', onclick: () => edit(() => shareLook([o, ...others.map((x) => lookSource(d, x))].filter((x, i, a) => a.indexOf(x) === i), o)) }, 'Dùng ngoại hình này cho tất cả'),
+      ...others.slice(0, 3).map((x) => h('button', { onclick: () => edit(() => shareLook([lookSource(d, x), o])) }, `Lấy ngoại hình của "${x.name}"`))));
+}
+
+function charTab(o: SceneObject, tab: string, look: SceneObject = o): any[] {
   const p = o.params;
   if (tab === 'pos') return [
     prop(o, 'pos'), prop(o, 'rotY'), prop(o, 'scale'), prop(o, 'visible'),
+    section('Cùng một người', note('Một nhân vật xuất hiện ở nhiều cảnh (sân khấu) là nhiều object. Nối chúng lại để mọi cảnh dùng chung một ngoại hình và giọng.'),
+      h('div', { class: 'srow' }, h('label', {}, 'Giống hệt'), h('select', { class: 'span2', onchange: (e: any) => edit(() => { const v = e.target.value; if (v) shareLook([lookSource(S.doc, S.doc.objects.find((x) => x.id === v)!), o]); else { const lp = lookParams(S.doc, o); o.params = { ...lp }; delete o.params.same; } }) },
+        h('option', { value: '' }, '— ngoại hình riêng —'),
+        ...S.doc.objects.filter((x) => x.kind === 'char' && x.id !== o.id && lookSource(S.doc, x).id !== o.id).map((x) => h('option', { value: x.id, selected: o.params.same === x.id }, `${x.name} (${S.doc.stages.find((s) => s.id === x.stage)?.name || x.stage})`))))),
     section('Trong xe', (() => {
       const cars = S.doc.objects.filter((x) => x.kind === 'car' && x.stage === o.stage);
       return h('div', { class: 'srow' }, h('label', {}, 'Ngồi trong'), h('select', { class: 'span2', onchange: (e: any) => edit(() => { if (e.target.value) { o.parent = e.target.value; o.tracks.pose = [{ t: 0, v: 'drive' }]; o.tracks.pos = [{ t: 0, v: [0, 0, 0] }]; o.tracks.rotY = [{ t: 0, v: 0 }]; } else { delete o.parent; o.tracks.pose = [{ t: 0, v: 'stand' }]; } }) },
@@ -127,9 +148,9 @@ function charTab(o: SceneObject, tab: string): any[] {
   }
   if (tab === 'face') return [
     choice(o, propDef('char', 'expr')!, EXPR_VI), prop(o, 'say'), voiceSection(o, section),
-    section('Chỉnh mặt', ...['face.x', 'face.y', 'eye.size', 'eye.gap', 'eye.y', 'brow.y', 'mouth.y', 'mouth.size'].map((k) => prop(o, k)),
-      h('button', { class: 'wide', onclick: () => edit(() => { for (const k of ['face.x', 'face.y', 'eye.size', 'eye.gap', 'eye.y', 'brow.y', 'mouth.y', 'mouth.size']) delete o.tracks[k]; }) }, 'Đặt lại mặt')),
-    section('Kính và da (cả video)', pCheck(o, 'Đeo kính cận', () => !!p.glasses, (v) => { if (v) p.glasses = true; else delete p.glasses; }), pColor(o, 'skin', 'Màu da')),
+    section('Chỉnh mặt', ...['face.x', 'face.y', 'eye.size', 'eye.gap', 'eye.y', 'brow.y', 'mouth.y', 'mouth.size'].map((k) => prop(look, k)),
+      h('button', { class: 'wide', onclick: () => edit(() => { for (const k of ['face.x', 'face.y', 'eye.size', 'eye.gap', 'eye.y', 'brow.y', 'mouth.y', 'mouth.size']) delete look.tracks[k]; }) }, 'Đặt lại mặt')),
+    section('Kính và da (cả video)', pCheck(look, 'Đeo kính cận', () => !!look.params.glasses, (v) => { if (v) look.params.glasses = true; else delete look.params.glasses; }), pColor(look, 'skin', 'Màu da')),
     prop(o, 'look'),
   ];
   if (tab === 'hair') {
@@ -322,9 +343,11 @@ export function render() {
   const head = h('div', { class: 'ihead' }, h('span', { class: 'kdot', style: { background: KIND_COLOR[o.kind] } }), h('input', { class: 'name', value: o.name, onchange: (e: any) => edit(() => { o.name = e.target.value || o.name; }) }), h('span', { class: 'kind' }, KIND_VI[o.kind]));
   if (o.kind === 'char') {
     if (!TABS.includes(S.tab)) S.tab = 'pos';
-    replace(insp, head, applyBar(),
+    // the same person in another stage: hair, clothes, accessories, face fixes and voice are edited on the shared look
+    const look = lookSource(S.doc, o);
+    replace(insp, head, applyBar(), personBanner(o, look),
       h('div', { class: 'tabs' }, ...TABS.map((tb) => h('button', { class: 'tab' + (S.tab === tb ? ' on' : ''), onclick: () => { S.tab = tb; render(); emit('select'); } }, TAB_NAME[tb]))),
-      h('div', { class: 'tabbody' }, ...charTab(o, S.tab)));
+      h('div', { class: 'tabbody' }, ...charTab(['hair', 'clothes', 'acc'].includes(S.tab) ? look : o, S.tab, look)));
   } else replace(insp, head, applyBar(), h('div', { class: 'tabbody' }, ...otherBody(o)));
 }
 

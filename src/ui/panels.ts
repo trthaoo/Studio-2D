@@ -1,6 +1,6 @@
 // Danh sách cảnh (Trong cảnh), thư viện thêm nhanh, thanh menu, màn hình project và hướng dẫn.
 import { S, on, emit, select, selObj, edit, save, openProject, newProject, toast, doUndo, doRedo, snapT } from '../state';
-import { valueAt, newId, SceneObject, Kind, normalize } from '../doc';
+import { valueAt, newId, SceneObject, Kind, normalize, LOOK_TRACK, lookMismatches, lookSource, shareLook } from '../doc';
 import { h, contextMenu, ask, KIND_COLOR, MenuItem } from './dom';
 import { setView, framePoint } from './viewport';
 import { expand, fit, deleteSelectedKeys } from './timeline';
@@ -73,8 +73,23 @@ export function duplicate(o: SceneObject) {
   const p = (c.tracks.pos ||= [{ t: 0, v: [0, 0, 0] }]); for (const k of p) { const v = k.v as number[]; k.v = [v[0] + 0.6, v[1], v[2]]; }
   edit((d) => d.objects.push(c)); select(c.id);
 }
+/** Every person who appears in several stages with different looks gets one look: that of their first object. */
+export function syncPeople() {
+  const groups = lookMismatches(S.doc);
+  if (!groups.length) return toast('Không có nhân vật nào trùng tên mà khác ngoại hình.');
+  edit((d) => { for (const g of groups) shareLook(g.map((x) => lookSource(d, x)).filter((x, i, a) => a.indexOf(x) === i)); });
+  toast(`Đã đồng bộ: ${groups.map((g) => `${g[0].name} (${g.length} cảnh)`).join(', ')}. Mọi cảnh giờ dùng ngoại hình của bản đầu tiên. Ctrl+Z để hoàn tác.`, 6000);
+}
 export function removeObj(o: SceneObject) {
   edit((d) => {
+    // the same person in other stages took their look from this one: the first of them keeps it now
+    const linked = d.objects.filter((x) => x.kind === 'char' && x.params.same === o.id);
+    if (linked.length) {
+      const heir = linked[0], own = { ...heir.params }; delete own.same;
+      heir.params = { ...Object.fromEntries(Object.entries(o.params).filter(([k]) => k !== 'same' || o.params.same !== heir.id)), ...own };
+      for (const [k, v] of Object.entries(o.tracks)) if (LOOK_TRACK.test(k) && !heir.tracks[k]) heir.tracks[k] = v;
+      for (const x of linked.slice(1)) x.params.same = heir.id;
+    }
     d.objects = d.objects.filter((x) => x.id !== o.id);
     for (const x of d.objects) if (x.parent === o.id) delete x.parent;
     if (o.kind === 'camera') d.cuts = d.cuts.filter((c) => c.camera !== o.id);
@@ -154,6 +169,8 @@ function renderMenu() {
       { sep: true, label: '' },
       { label: 'Nhân bản (Ctrl+D)', disabled: !selObj(), action: () => duplicate(selObj()!) },
       { label: 'Xoá (Delete)', action: deleteSelection },
+      { sep: true, label: '' },
+      { label: 'Đồng bộ ngoại hình nhân vật trùng tên', action: syncPeople },
     ]),
     menuButton('Xem', () => [
       { label: 'Khung hình video (C)', checked: S.view === 'camera', action: () => setView('camera') },

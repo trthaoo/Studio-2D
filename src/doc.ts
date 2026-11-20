@@ -243,6 +243,60 @@ export function normalize(doc: any): SceneDoc {
   return doc as SceneDoc;
 }
 
+// ------------------------------------------------------------------ one person in several stages
+// An object lives in one stage, so a character who appears in two places (Act 1 street, Act 3 yard) is two objects.
+// `params.same: "<id>"` makes an object that same person: its look (every build param, the voice, and the part
+// fixes hair.* face.* eye.* brow.* mouth.* acc.* it has no keys of its own for) comes from that object.
+const OWN_PARAMS = new Set(['same', 'side', 'autoWalk', 'stride', 'breath', 'blink']);
+export const LOOK_TRACK = /^(hair|face|eye|brow|mouth|acc)\./;
+/** The object a character takes its look from (itself when not linked; follows chains, ignores loops). */
+export function lookSource(doc: SceneDoc, o: SceneObject): SceneObject {
+  let cur = o; const seen = new Set([o.id]);
+  while (cur.kind === 'char' && cur.params.same) {
+    const nx = doc.objects.find((x) => x.id === cur.params.same && x.kind === 'char');
+    if (!nx || seen.has(nx.id)) break; seen.add(nx.id); cur = nx;
+  }
+  return cur;
+}
+/** Build params of a character with its shared look applied. */
+export function lookParams(doc: SceneDoc, o: SceneObject): Record<string, any> {
+  const src = lookSource(doc, o); if (src === o) return o.params;
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(src.params)) if (!OWN_PARAMS.has(k)) out[k] = v;
+  for (const [k, v] of Object.entries(o.params)) if (OWN_PARAMS.has(k)) out[k] = v;
+  return out;
+}
+/** A part-fix value (hair.x, eye.size, ...) of a character: its own keys, else the shared look's. */
+export function lookValue(doc: SceneDoc, o: SceneObject, key: string, t: number) {
+  if (o.tracks[key]?.length) return valueAt(o, key, t);
+  const src = lookSource(doc, o); return valueAt(src === o ? o : src, key, src === o ? t : 0);
+}
+/** "Zoe (Act 1)", "Act3 Zoe", "Zoe in the yard" -> "zoe": who a character is, from its name. */
+export function personKey(name: string) {
+  return name.toLowerCase().replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/^\s*(act|scene|cảnh|phần|part)\s*\d+[:.\-\s]*/i, '').split(/\s+(in|at|ở|trong|tại|-|–)\s+/)[0].trim().split(/\s+/)[0] || name.toLowerCase();
+}
+/** Characters that look like one person (same name) but each have their own look: [[first, ...others]]. */
+export function lookMismatches(doc: SceneDoc): SceneObject[][] {
+  const groups = new Map<string, SceneObject[]>();
+  for (const o of doc.objects) if (o.kind === 'char') { const k = personKey(o.name); groups.set(k, [...(groups.get(k) || []), o]); }
+  const out: SceneObject[][] = [];
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    const roots = new Set(g.map((o) => lookSource(doc, o).id));
+    if (roots.size > 1) out.push(g);
+  }
+  return out;
+}
+/** Give every other object of the group the look of the first (its own build params are dropped). */
+export function shareLook(group: SceneObject[], src = group[0]) {
+  for (const o of group) {
+    if (o === src) continue;
+    const keep: Record<string, any> = {}; for (const [k, v] of Object.entries(o.params)) if (OWN_PARAMS.has(k) && k !== 'same') keep[k] = v;
+    o.params = { ...keep, same: src.id };
+    for (const k of Object.keys(o.tracks)) if (LOOK_TRACK.test(k)) delete o.tracks[k];   // the part fixes come from the source too
+  }
+}
+
 /** The end of the last key, cut, caption: what the video needs at least. */
 export function contentEnd(doc: SceneDoc) {
   let e = 0;

@@ -1,14 +1,26 @@
 // Captions: one card at a time, instant on/off, centred at 1372 px (71% of 1920), Poppins 800 76 px,
 // white with a black outline and a soft shadow. caps: [[t, 'text'], ...] sorted by time.
+// 2D Studio: always laid out in 1080x1920 units, whatever the canvas size (the studio preview draws into a smaller
+// canvas with a scale transform), and a card too wide for the frame shrinks to fit inside it.
+export const CAP_Y = 1372, CAP_PX = 76, CAP_W = 1080;
+function capAt(caps, t) { let i = -1; for (let k = 0; k < caps.length; k++) if (t >= caps[k][0] || k === 0) i = k; return i; }
+function capSize(ctx, s) { ctx.font = `800 ${CAP_PX}px Cap`; const w = ctx.measureText(s).width + 13; return w > CAP_W * 0.92 ? Math.floor(CAP_PX * CAP_W * 0.92 / w) : CAP_PX; }
 export function drawCaption(ctx, caps, t) {
   if (!caps.length) return;
-  let s = caps[0][1]; for (const [ct, w] of caps) if (t >= ct) s = w;
+  const s = caps[capAt(caps, t)][1];
   if (!s) return;
-  const W = ctx.canvas.width;
-  ctx.save(); ctx.font = '800 76px Cap'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.lineJoin = 'round';
-  ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 5;
-  ctx.strokeStyle = '#000'; ctx.lineWidth = 13; ctx.strokeText(s, W / 2, 1372);
-  ctx.shadowColor = 'transparent'; ctx.fillStyle = '#fff'; ctx.fillText(s, W / 2, 1372); ctx.restore();
+  ctx.save(); const px = capSize(ctx, s), k = px / CAP_PX;
+  ctx.font = `800 ${px}px Cap`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.lineJoin = 'round';
+  ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 14 * k; ctx.shadowOffsetY = 5 * k;
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 13 * k; ctx.strokeText(s, CAP_W / 2, CAP_Y);
+  ctx.shadowColor = 'transparent'; ctx.fillStyle = '#fff'; ctx.fillText(s, CAP_W / 2, CAP_Y); ctx.restore();
+}
+/** Where the caption card at t is, in 1080x1920 units: { index, x0, y0, x1, y1 }, or null when none shows. */
+export function captionBox(ctx, caps, t) {
+  if (!caps.length) return null;
+  const i = capAt(caps, t), s = caps[i][1]; if (!s) return null;
+  ctx.save(); const px = capSize(ctx, s); ctx.font = `800 ${px}px Cap`; const w = ctx.measureText(s).width; ctx.restore();
+  return { index: i, x0: CAP_W / 2 - w / 2 - 16, x1: CAP_W / 2 + w / 2 + 16, y0: CAP_Y - px * 0.95, y1: CAP_Y + px * 0.35 };
 }
 
 // Sentence start times from word timings: S[0] is sentence 1. Use them for shot starts so a new take retimes the edit.

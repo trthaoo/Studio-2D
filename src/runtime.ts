@@ -11,7 +11,7 @@ import { addRoom } from 'engine/sets/room.js';
 import { addHouse } from 'engine/sets/house.js';
 import { addHighway } from 'engine/sets/highway.js';
 import { drawCaption } from 'engine/captions.js';
-import { SceneDoc, SceneObject, Stage, valueAt, activeCut, wordsOf, JOINTS, Joint, Vec3 } from './doc';
+import { SceneDoc, SceneObject, Stage, valueAt, activeCut, wordsOf, JOINTS, Joint, Vec3, lookParams, lookValue } from './doc';
 import { codeAsset, tryBuild, vfxCodeOf } from './library';
 import { stageMood, skySig, applyLive } from './lighting';
 import { buildFx, fxStart } from './vfx';
@@ -67,7 +67,7 @@ export class Runtime {
     for (const id of [...this.built.keys()]) if (!ids.has(id)) this.drop(id);
     for (const o of doc.objects) {
       if (o.kind === 'camera') continue;
-      const sig = JSON.stringify([o.kind, o.params, o.stage, o.parent || null, o.params.type === 'code' ? (o.kind === 'fx' ? vfxCodeOf(o.params.code) ?? null : codeAsset(o.params.code)?.code ?? null) : null]);
+      const sig = JSON.stringify([o.kind, o.kind === 'char' ? lookParams(doc, o) : o.params, o.stage, o.parent || null, o.params.type === 'code' ? (o.kind === 'fx' ? vfxCodeOf(o.params.code) ?? null : codeAsset(o.params.code)?.code ?? null) : null]);
       const b = this.built.get(o.id);
       if (b && b.sig === sig) { b.obj = o; continue; }
       if (b) this.drop(o.id);
@@ -91,7 +91,7 @@ export class Runtime {
   private build(o: SceneObject, sig: string) {
     const root = new THREE.Group(); root.name = o.name; root.userData.docId = o.id;
     let inner: any, attach: THREE.Object3D = root, light: THREE.PointLight | undefined;
-    const p = o.params || {};
+    const p = (o.kind === 'char' ? lookParams(this.doc, o) : o.params) || {};
     if (o.kind === 'char') {
       inner = makeChar({ R: 0.2, shirt: 0x2f6fe0, hair: '#1c1c24', hair2: '#3a3a48', style: 'mess', ...hexify(p) });
       root.add(inner);
@@ -213,7 +213,7 @@ export class Runtime {
       if (b.obj.kind !== 'char' || b.obj.stage !== stageId || !b.root.visible) continue;
       const { final: f, face, expr } = this.poseOf(b, t);
       b.pose = f;
-      const o = b.obj, v = (k: string) => valueAt(o, k, t) as number;
+      const o = b.obj, v = (k: string) => lookValue(this.doc, o, k, t) as number;   // own part fixes, else the shared look's
       const adj = { hairX: v('hair.x'), hairY: v('hair.y'), hairSize: v('hair.size'), hairVol: v('hair.vol'), hairFringe: v('hair.fringe'), hairSide: v('hair.side'), hairPart: v('hair.part'),
         faceX: v('face.x'), faceY: v('face.y'), eyeSize: v('eye.size'), eyeGap: v('eye.gap'), eyeY: v('eye.y'), browY: v('brow.y'), mouthY: v('mouth.y'), mouthSize: v('mouth.size'),
         accX: v('acc.x'), accY: v('acc.y'), accSize: v('acc.size') };
@@ -387,7 +387,8 @@ export class Runtime {
       const px = cv.getContext('2d', { willReadFrequently: true })!.getImageData(Math.max(0, Math.min(S - 1, x)), Math.max(0, Math.min(S - 1, y)), 1, 1).data;
       const near = (hex: any) => { if (!hex) return false; const c = new THREE.Color(typeof hex === 'string' ? hex : hex); return Math.abs(px[0] - c.r * 255) + Math.abs(px[1] - c.g * 255) + Math.abs(px[2] - c.b * 255) < 110; };
       const cx = S / 2, cy = S / 2, R = S * 0.3, dy = (y - cy) / R;
-      if (near(o.params.hair) || near(o.params.hair2) || dy < -0.75 || Math.hypot(x - cx, y - cy) > R * 1.02) return 'hair';
+      const lp = lookParams(this.doc, o);
+      if (near(lp.hair) || near(lp.hair2) || dy < -0.75 || Math.hypot(x - cx, y - cy) > R * 1.02) return 'hair';
       return 'face';
     }
     if (ch.children.indexOf(h.object) >= 0 && (h.object as any).geometry?.type === 'TubeGeometry') return 'pose';

@@ -2,7 +2,7 @@
 // ("say") thành một đoạn âm thanh trên hàng Âm thanh, đặt đúng lúc câu bắt đầu, và miệng nhép kéo theo độ dài giọng.
 // Máy chủ Breeze chạy riêng (cần Linux + GPU NVIDIA); back end: scripts/tts.ts.
 import { S, edit, save, toast } from '../state';
-import { SceneObject, Key, AudioClip } from '../doc';
+import { SceneObject, Key, AudioClip, lookSource } from '../doc';
 import { h } from './dom';
 import { AIH } from './ai';
 
@@ -12,7 +12,8 @@ export const LICENSE_NOTE = 'Breeze TTS 2 chỉ nói tiếng Anh và tiếng Tru
 
 /** A stable seed per character, so a character keeps its voice until someone changes it. */
 const idSeed = (id: string) => { let x = 7; for (const c of id) x = (x * 31 + c.charCodeAt(0)) >>> 0; return x % 100000; };
-export function voiceOf(o: SceneObject): Voice { const v: Voice = o.params.voice || {}; return { instruction: v.ref ? v.instruction : v.instruction || DEFAULT_INSTRUCTION, ref: v.ref, refText: v.refText, seed: v.seed ?? idSeed(o.id), cfg: v.cfg }; }
+/** The same person in several stages speaks with one voice: the voice lives on the shared look (doc lookSource). */
+export function voiceOf(o: SceneObject): Voice { const src = lookSource(S.doc, o), v: Voice = src.params.voice || {}; return { instruction: v.ref ? v.instruction : v.instruction || DEFAULT_INSTRUCTION, ref: v.ref, refText: v.refText, seed: v.seed ?? idSeed(src.id), cfg: v.cfg }; }
 const lines = (o: SceneObject) => (o.tracks.say || []).filter((k) => String(k.v || '').trim());
 export const speakers = () => S.doc.objects.filter((o) => o.kind === 'char' && lines(o).length);
 
@@ -103,7 +104,8 @@ export async function previewVoice(o: SceneObject, text?: string) {
 
 /** Thẻ Mặt của nhân vật: giọng đọc. */
 export function voiceSection(o: SceneObject, section: (title: string, ...kids: any[]) => HTMLElement) {
-  const v: Voice = o.params.voice || {}, set = (patch: Partial<Voice>) => edit(() => { const n: any = { ...(o.params.voice || {}), ...patch }; for (const k of Object.keys(n)) if (n[k] === '' || n[k] == null) delete n[k]; if (Object.keys(n).length) o.params.voice = n; else delete o.params.voice; });
+  const src = lookSource(S.doc, o);
+  const v: Voice = src.params.voice || {}, set = (patch: Partial<Voice>) => edit(() => { const n: any = { ...(src.params.voice || {}), ...patch }; for (const k of Object.keys(n)) if (n[k] === '' || n[k] == null) delete n[k]; if (Object.keys(n).length) src.params.voice = n; else delete src.params.voice; });
   const refIn = h('input', { type: 'file', accept: 'audio/wav,audio/x-wav,.wav,.flac' }) as HTMLInputElement;
   refIn.onchange = async () => {
     const f = refIn.files?.[0]; if (!f) return;
