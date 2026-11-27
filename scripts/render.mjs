@@ -28,22 +28,76 @@ function ff(args) {
   return p;
 }
 const dataBuf = (url) => Buffer.from(url.slice(url.indexOf(',') + 1), 'base64');
-
-async function launch() {
-  const args = ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'];
-  for (const channel of ['msedge', 'chrome', undefined]) {
-    try { return await chromium.launch({ channel, headless: true, args }); } catch (e) { if (!channel) throw e; }
+/** Move the finished file over the old one; when the old one is locked (open somewhere), retry, then use a new name. */
+async function putInPlace(src, dst) {
+  for (let i = 0; i < 8; i++) {
+    try { if (fs.existsSync(dst)) fs.rmSync(dst); fs.renameSync(src, dst); return dst; }
+    catch (e) { if (!/EPERM|EBUSY|EACCES/.test(e.code || e.message)) throw e; await new Promise((r) => setTimeout(r, 600)); }
   }
+  const d = new Date(), p = (n) => String(n).padStart(2, '0');
+  const alt = dst.replace(/\.mp4$/, ` ${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.mp4`);
+  fs.renameSync(src, alt); log(`WARN File cũ đang được mở ở chỗ khác, video mới lưu thành: ${path.basename(alt)}`);
+  return alt;
 }
 
-const browser = await launch();
+// The headless browser draws with the GPU through the system's own graphics API (Windows: Direct3D 11, macOS: Metal,
+// Linux: OpenGL); when WebGL does not come up that way, it draws on the CPU (SwiftShader: slower, same picture).
+const GPU_ARGS = { win32: ['--use-angle=d3d11'], darwin: ['--use-angle=metal'], linux: ['--use-angle=gl'] }[process.platform] || [];
+const CPU_ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+const withTimeout = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`Quá ${Math.round(ms / 1000)} giây mà vẫn chưa ${what}.`)), ms))]);
+async function openBrowser(args) {
+  const tried = [];
+  for (const channel of process.platform === 'win32' ? ['msedge', 'chrome', undefined] : ['chrome', 'msedge', undefined]) {
+    try { const b = await chromium.launch({ channel, headless: true, args: [...args, '--enable-gpu', '--ignore-gpu-blocklist'] }); return { browser: b, name: channel || 'chromium (playwright)' }; }
+    catch (e) { tried.push(`${channel || 'chromium'}: ${String(e.message).split('\n')[0]}`); }
+  }
+  throw new Error('Không mở được trình duyệt để xuất video. Cài Google Chrome, hoặc chạy lệnh: npx playwright install chromium\n' + tried.join('\n'));
+}
+/** A browser whose page has WebGL (the GPU first, then the CPU). */
+async function launch() {
+  const modes = [['GPU', GPU_ARGS], ['CPU (SwiftShader)', CPU_ARGS]];
+  for (const [mode, args] of argv.includes('--cpu') ? modes.slice(1) : modes) {   // --cpu: skip the GPU
+    const { browser, name: bn } = await openBrowser(args);
+    const page = await browser.newPage();
+    const gl = await page.evaluate(() => { const c = document.createElement('canvas'), g = c.getContext('webgl2'); if (!g) return null; const e = g.getExtension('WEBGL_debug_renderer_info'); return e ? g.getParameter(e.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER); }).catch(() => null);
+    await page.close();
+    if (gl) { log(`Trình duyệt: ${bn}, vẽ bằng ${mode}: ${gl}`); return browser; }
+    log(`${bn}: không có WebGL khi vẽ bằng ${mode}, thử cách khác...`); await browser.close();
+  }
+  throw new Error('Trình duyệt không tạo được WebGL (cả GPU lẫn CPU). Cập nhật Google Chrome rồi thử lại.');
+}
+
+// --check: is this machine able to render? (browser, WebGL, ffmpeg, and one frame of the project)
+if (argv.includes('--check')) {
+  let ok = true;
+  log(`Máy: ${process.platform} ${process.arch}, Node ${process.version}`);
+  try { const v = await new Promise((res, rej) => { const p = spawn(ffmpegPath, ['-version']); let o = ''; p.stdout.on('data', (d) => (o += d)); p.on('error', rej); p.on('close', (c) => (c === 0 ? res(o.split('\n')[0]) : rej(new Error('ffmpeg exit ' + c)))); }); log('ffmpeg: ' + v); }
+  catch (e) { ok = false; log('LỖI ffmpeg: ' + e.message + ' (chạy lại: npm install)'); }
+  let b = null;
+  try {
+    b = await launch();
+    const page = await b.newPage({ viewport: { width: 1080, height: 1920 } });
+    page.on('pageerror', (e) => log('[page error]', e.message));
+    await withTimeout(page.goto(`http://localhost:${port}/render.html?project=${encodeURIComponent(name)}`), 60000, 'mở được trang xuất video (studio có đang chạy không?)');
+    await withTimeout(page.evaluate(() => window.__ready), 120000, 'dựng xong cảnh');
+    const info = await page.evaluate(() => window.info());
+    if (info.errors.length) log('Cảnh có lỗi: ' + info.errors.join(' | '));
+    const t0 = Date.now(); const url = await withTimeout(page.evaluate(() => window.renderFull(0)), 60000, 'vẽ xong khung đầu');
+    log(`Vẽ một khung: ${Date.now() - t0} ms, ${Math.round(url.length * 0.75 / 1024)} KB. Video ${info.duration}s, ${info.fps} khung/giây.`);
+  } catch (e) { ok = false; log('LỖI: ' + e.message); }
+  finally { await b?.close().catch(() => {}); }
+  log(ok ? 'CHECK OK: máy này xuất được video.' : 'CHECK FAILED');
+  process.exit(ok ? 0 : 1);
+}
+
+const browser = await launch().catch((e) => { console.error('RENDER FAILED: ' + e.message); process.exit(1); });
 let failed = false;
 try {
   const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') log('[page]', m.text()); });
   page.on('pageerror', (e) => log('[page error]', e.message));
-  await page.goto(`http://localhost:${port}/render.html?project=${encodeURIComponent(name)}`);
-  await page.evaluate(() => window.__ready);
+  await withTimeout(page.goto(`http://localhost:${port}/render.html?project=${encodeURIComponent(name)}`), 60000, 'mở được trang xuất video (studio có đang chạy không?)');
+  await withTimeout(page.evaluate(() => window.__ready), 120000, 'dựng xong cảnh');
   const info = await page.evaluate(() => window.info());
   if (info.errors.length) log('WARN build errors:', info.errors.join(' | '));
   const fps = info.fps, from = +opt('--from', 0), to = Math.min(info.duration, +opt('--to', info.duration));
@@ -68,9 +122,9 @@ try {
   const t0 = Date.now();
   for (let i = 0; i < n; i++) {
     const t = from + i / fps;
-    if (!layersOn) await main.write(dataBuf(await page.evaluate((tt) => window.renderFull(tt), t)));
+    if (!layersOn) await main.write(dataBuf(await withTimeout(page.evaluate((tt) => window.renderFull(tt), t), 90000, `vẽ xong khung ${i + 1}`)));
     else {
-      const r = await page.evaluate((tt) => window.renderLayers(tt), t);
+      const r = await withTimeout(page.evaluate((tt) => window.renderLayers(tt), t), 300000, `vẽ xong khung ${i + 1} (kèm layer)`);
       await main.write(dataBuf(r.full)); await clean.write(dataBuf(r.clean)); await caps.write(dataBuf(r.captions));
       for (const l of info.layers) await per[l.id].write(dataBuf(r.layers[l.id] || blank));
     }
@@ -80,18 +134,22 @@ try {
   for (const p of all) p.stdin.end();
   await Promise.all(all.map((p) => p.done));
 
-  // sound: every clip at its time, mixed, muxed
-  const out = base + '.mp4';
+  // sound: every clip at its time, mixed, muxed (into a temporary file first)
+  let out = base + '.mp4';
+  const done = base + '.done.mp4';
   const clips = (info.audio || []).filter((a) => fs.existsSync(path.join(ROOT, 'Projects', safe(name), a.file)));
+  const missing = (info.audio || []).length - clips.length; if (missing) log(`WARN ${missing} đoạn âm thanh không có file, bỏ qua.`);
   if (clips.length) {
     const ins = clips.flatMap((a) => ['-i', path.join(ROOT, 'Projects', safe(name), a.file)]);
     // offset / dur: clips cut or trimmed on the timeline use only part of their file
     const trim = (a) => { const off = a.offset || 0, s = off + Math.max(0, from - a.start); return `atrim=start=${s}${a.dur != null ? `:end=${off + a.dur}` : ''},asetpts=PTS-STARTPTS`; };
     const fil = clips.map((a, i) => `[${i + 1}:a]${trim(a)},adelay=${Math.round(Math.max(0, a.start - from) * 1000)}:all=1,volume=${a.gain || 0}dB[a${i}]`).join(';')
       + `;${clips.map((_, i) => `[a${i}]`).join('')}amix=inputs=${clips.length}:normalize=0:duration=longest[mix]`;
-    await ff(['-i', silent, ...ins, '-filter_complex', fil, '-map', '0:v', '-map', '[mix]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-t', String(to - from), '-movflags', '+faststart', out]).done;
+    await ff(['-i', silent, ...ins, '-filter_complex', fil, '-map', '0:v', '-map', '[mix]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-t', String(to - from), '-movflags', '+faststart', done]).done;
     fs.rmSync(silent);
-  } else fs.renameSync(silent, out);
+  } else fs.renameSync(silent, done);
+  // the last video may still be open (the studio's player, a video app, OneDrive syncing): wait for it, else a new name
+  out = await putInPlace(done, out);
 
   if (layersOn) {
     const manifest = {

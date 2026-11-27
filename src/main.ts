@@ -50,7 +50,12 @@ if (import.meta.hot) {
     await openProject(name, true);
     toast('Claude (hoặc ai đó) vừa sửa scene: đã tải lại. Ctrl+Z để bỏ thay đổi đó.', 4000);
   });
-  import.meta.hot.on('render-done', () => { pollRender(); onRenderChanged(); });
+  import.meta.hot.on('render-done', (d: any) => {
+    pollRender(); onRenderChanged();
+    // wherever you are in the studio, say how the render ended
+    if (d?.state === 'error') toast('Xuất video bị lỗi. Mở tab Xuất video để xem lý do và bấm "Kiểm tra máy xuất video".', 9000);
+    else if (d?.state === 'done') toast(`Xuất xong: ${d.out || 'video'}`, 6000);
+  });
   import.meta.hot.on('library-changed', async () => { await loadLibrary(); rt.sync(S.doc); emit('doc'); });
 }
 

@@ -21,7 +21,7 @@ function body(req: any): Promise<Buffer> {
 function json(res: any, data: unknown, code = 200) { res.statusCode = code; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(data)); }
 const hash = (s: string | Buffer) => crypto.createHash('sha1').update(s).digest('hex');
 
-interface Job { id: string; kind: 'render' | 'ref'; project: string; layers: boolean; state: 'running' | 'done' | 'error'; progress: string; log: string[]; out?: string; proc?: ChildProcess; started: number;
+interface Job { id: string; kind: 'render' | 'ref'; project: string; layers: boolean; state: 'running' | 'done' | 'error' | 'stopped'; stopped?: boolean; progress: string; log: string[]; out?: string; proc?: ChildProcess; started: number;
   session?: string; frames?: number; fps?: number; layerCount?: number; loopStart?: number; loopSeconds?: number; from?: number; to?: number }
 
 // performance log (src/perf.ts): one JSON per studio session, one line per video render. Per machine, not in git.
@@ -55,7 +55,7 @@ function studioApi(): Plugin {
           const m = l.match(/^Rendering ".*" (\d+) frames at ([\d.]+) fps(?:, (\d+) layers)?/); if (m) { job.frames = +m[1]; job.fps = +m[2]; job.layerCount = m[3] ? +m[3] : undefined; job.loopStart = Date.now(); }
         } };
         job.proc.stdout!.on('data', (d) => onLine(d.toString())); job.proc.stderr!.on('data', (d) => onLine(d.toString()));
-        job.proc.on('close', (code) => { job.state = code === 0 ? 'done' : 'error'; job.proc = undefined; logRender(job); server.ws.send({ type: 'custom', event: job.kind === 'ref' ? 'ref-done' : 'render-done', data: { id: job.id, state: job.state, out: job.out, project: job.project } }); });
+        job.proc.on('close', (code) => { job.state = code === 0 ? 'done' : job.stopped ? 'stopped' : 'error'; job.proc = undefined; logRender(job); server.ws.send({ type: 'custom', event: job.kind === 'ref' ? 'ref-done' : 'render-done', data: { id: job.id, state: job.state, out: job.out, project: job.project } }); });
         jobs.push(job);
       };
       fs.mkdirSync(PROJECTS, { recursive: true }); fs.mkdirSync(EXPORTS, { recursive: true });
@@ -154,8 +154,16 @@ function studioApi(): Plugin {
               const j = [...jobs].reverse().find((q) => q.kind === 'render'); if (!j) return json(res, null);
               const { proc, ...rest } = j; return json(res, { ...rest, log: j.log.slice(-30) });
             }
+            case 'POST /api/render/check': {   // can this machine render? browser, WebGL, ffmpeg, one frame of the project
+              if (jobs.some((j) => j.state === 'running' && j.kind === 'render')) return json(res, { error: 'Đang xuất một video, đợi xong rồi kiểm tra.' }, 409);
+              const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'render.mjs'), name || 'Demo office', '--check', '--port', String(server.config.server.port || PORT)], { cwd: ROOT });
+              let out = ''; p.stdout.on('data', (d) => (out += d)); p.stderr.on('data', (d) => (out += d));
+              const timer = setTimeout(() => { p.kill(); out += '\nLỖI: kiểm tra quá 4 phút, đã dừng.'; }, 240000);
+              const code: number = await new Promise((r) => p.on('close', (c) => r(c ?? 1))); clearTimeout(timer);
+              return json(res, { ok: code === 0, log: out.trim() });
+            }
             case 'DELETE /api/render': {
-              const j = jobs.find((q) => q.state === 'running' && q.kind === 'render'); if (j?.proc) j.proc.kill(); return json(res, { ok: true });
+              const j = jobs.find((q) => q.state === 'running' && q.kind === 'render'); if (j?.proc) { j.stopped = true; j.proc.kill(); } return json(res, { ok: true });
             }
             // ---- Breeze TTS (scripts/tts.ts)
             case 'GET /api/tts/status': return json(res, await ttsStatus());

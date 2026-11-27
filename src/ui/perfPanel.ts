@@ -141,7 +141,7 @@ function render() {
     rs.length ? h('div', { class: 'perf-scroll' }, h('table', { class: 'perf-table' },
       h('thead', {}, h('tr', {}, ...['Lúc', 'Project', 'Kết quả', 'Layer', 'Khung', 'Đoạn', 'Thời gian', 'Render rate', 'ms/khung', 'So với thời gian thực'].map((c) => h('th', {}, c)))),
       h('tbody', {}, ...rs.map((r) => h('tr', { class: r.session === picked ? 'on' : '' },
-        h('td', {}, when(r.at)), h('td', {}, r.project), h('td', { class: r.state === 'done' ? 'good' : 'bad' }, r.state === 'done' ? 'Xong' : r.state === 'error' ? 'Lỗi / dừng' : r.state),
+        h('td', {}, when(r.at)), h('td', {}, r.project), h('td', { class: r.state === 'done' ? 'good' : 'bad' }, r.state === 'done' ? 'Xong' : r.state === 'error' ? 'Lỗi' : r.state === 'stopped' ? 'Đã dừng' : r.state),
         h('td', {}, r.layers ? `có (${r.layerCount ?? '?'})` : 'không'), h('td', { class: 'n' }, `${r.framesDone}/${r.frames ?? '?'} @${r.videoFps ?? '?'}`),
         h('td', {}, r.from != null || r.to != null ? `${num(r.from ?? 0)}–${num(r.to)} s` : 'cả video'), h('td', { class: 'n' }, dur(r.totalSeconds)),
         h('td', { class: 'n' }, r.renderFps != null ? `${num(r.renderFps)} khung/giây` : '–'), h('td', { class: 'n' }, num(r.msPerFrame, 0)),
