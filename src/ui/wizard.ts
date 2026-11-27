@@ -6,6 +6,7 @@ import { autoBuild, briefMarkdown, speakersOf, parseScript, BUILTIN_BG, Brief, C
 import { normalize } from '../doc';
 import { h, ask } from './dom';
 import { fit } from './timeline';
+import { planPanel } from './planPanel';
 
 const EXAMPLE = `Dan: Sếp ơi, em cần tăng lương.
 Sếp: Không được.
@@ -18,7 +19,7 @@ function audioDuration(f: File): Promise<number> {
 
 interface Draft {
   idea: string; script: string; mood: string; cast: Record<string, string>; bg: string; voice?: { file: string; duration: number } | null;
-  mode?: 'idea' | 'clone'; refUrl?: string; lang?: 'en' | 'auto'; useRefVoice?: boolean; useRefCuts?: boolean;
+  mode?: 'ai' | 'idea' | 'clone'; refUrl?: string; lang?: 'en' | 'auto'; useRefVoice?: boolean; useRefCuts?: boolean;
   lineTimes?: Array<{ s: number; e: number }> | null;
   extra?: string[];   // cast picked here that has no lines in the script yet
 }
@@ -30,15 +31,20 @@ function current(): Draft {
   const b = S.doc.brief;
   draftFor = S.project; voiceFile = null; voiceDur = 0;
   draft = b ? { idea: b.idea || '', script: b.script || '', mood: b.mood || 'day', cast: Object.fromEntries(Object.entries(b.cast || {}).map(([k, v]: any) => [k, `${v.from}:${v.name}`])), bg: `${b.background?.from || 'builtin'}:${b.background?.name || 'office'}`, voice: b.audio || null,
-      mode: b.ref ? 'clone' : 'idea', refUrl: b.ref?.url || '', useRefVoice: true, useRefCuts: !!b.refCuts, lineTimes: b.lineTimes || null,
+      mode: b.ref ? 'clone' : S.doc.plan ? 'ai' : 'idea', refUrl: b.ref?.url || '', useRefVoice: true, useRefCuts: !!b.refCuts, lineTimes: b.lineTimes || null,
       extra: Object.keys(b.cast || {}).filter((k) => !speakersOf(b.script || '').includes(k)) }
-    : { idea: '', script: S.doc.objects.some((o) => o.kind === 'char') ? '' : EXAMPLE, mood: 'day', cast: {}, bg: 'builtin:office', voice: null, mode: 'idea', useRefVoice: true, useRefCuts: true };
+    : { idea: '', script: S.doc.objects.some((o) => o.kind === 'char') ? '' : EXAMPLE, mood: 'day', cast: {}, bg: 'builtin:office', voice: null, mode: S.doc.objects.some((o) => o.kind === 'char') && !S.doc.plan ? 'idea' : 'ai', useRefVoice: true, useRefCuts: true };
   return draft;
 }
 
 export async function scriptPanel(root: HTMLElement) {
   await loadLibrary();
   const d = current();
+  const modeBar = h('div', { class: 'seg modeseg' },
+    h('button', { class: d.mode === 'ai' ? 'on' : '', onclick: () => { d.mode = 'ai'; scriptPanel(root); } }, 'Chat với AI'),
+    h('button', { class: d.mode === 'idea' ? 'on' : '', onclick: () => { d.mode = 'idea'; scriptPanel(root); } }, 'Tự viết kịch bản'),
+    h('button', { class: d.mode === 'clone' ? 'on' : '', onclick: () => { d.mode = 'clone'; scriptPanel(root); } }, 'Clone video tham khảo'));
+  if (d.mode === 'ai') return planPanel(root, modeBar);   // chat -> plan -> review every parameter -> build / render
   const sec = (n: string, title: string, ...kids: any[]) => h('section', { class: 'wsec' }, h('div', { class: 'wsec-h' }, h('span', { class: 'wnum' }, n), title), ...kids);
   const idea = h('textarea', { rows: 3, value: d.idea, placeholder: 'Ví dụ: nhân viên đòi tăng lương, sếp từ chối theo cách bất ngờ', oninput: (e: any) => { d.idea = e.target.value; } });
   const script = h('textarea', { rows: 12, class: 'script', value: d.script, placeholder: 'Tên: câu thoại\nTên khác: câu thoại\nDòng không có tên là lời dẫn' }) as HTMLTextAreaElement;
@@ -150,9 +156,7 @@ export async function scriptPanel(root: HTMLElement) {
   root.replaceChildren(h('div', { class: 'wsdoc' },
     h('div', { class: 'wshead' }, h('h1', {}, 'Kịch bản'),
       h('p', { class: 'hint' }, 'Viết từ ý tưởng của bạn, hoặc clone một video có sẵn (dán link hay chọn file). Chọn nhân vật và bối cảnh, rồi dựng. Sau đó sang Dựng cảnh để sửa từng thứ trên timeline.'),
-      h('div', { class: 'seg modeseg' },
-        h('button', { class: clone ? '' : 'on', onclick: () => { d.mode = 'idea'; scriptPanel(root); } }, 'Từ ý tưởng'),
-        h('button', { class: clone ? 'on' : '', onclick: () => { d.mode = 'clone'; scriptPanel(root); } }, 'Clone video tham khảo'))),
+      modeBar),
     h('div', { class: 'wcols' },
       h('div', {},
         clone ? sec('1', 'Video tham khảo', refBox) : sec('1', 'Ý tưởng', idea),

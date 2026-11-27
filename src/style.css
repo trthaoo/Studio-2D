@@ -243,6 +243,51 @@ textarea.code { font: .92rem/1.5 Consolas, "Cascadia Mono", monospace; backgroun
 .modal .title { font-weight: 600; font-size: 1.08rem; }
 .modal .row { justify-content: flex-end; margin: 0; }
 .modal.help { width: min(640px, 94vw); }
+/* Kịch bản > Chat với AI + duyệt plan */
+.wsdoc.wide { max-width: none; }
+.plancols { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 1000px) { .plancols { grid-template-columns: minmax(0, 1fr); } }
+.wsec.chat { position: sticky; top: 0; display: flex; flex-direction: column; gap: 8px; }
+.chatlog { max-height: 46vh; min-height: 140px; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px; background: #1a1d23; border: 1px solid var(--line2); border-radius: 6px; }
+.msg { padding: 7px 9px; border-radius: 6px; font-size: .9rem; white-space: pre-wrap; }
+.msg .who { font-size: .75rem; color: #8f99a8; margin-bottom: 2px; }
+.msg.user { background: #2a3140; align-self: flex-end; max-width: 92%; }
+.msg.ai { background: #232a24; border: 1px solid #35513d; max-width: 96%; }
+.chatstatus { flex: 1; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font-size: .8rem; padding: 2px 8px; border-radius: 12px; border: 1px solid var(--line2); background: var(--panel3); cursor: pointer; display: inline-flex; align-items: center; gap: 3px; }
+.chip.on { border-color: var(--accent); color: #ffd79a; }
+.chip input { margin: 0; }
+.nochat textarea { width: 100%; }
+.planreview { display: flex; flex-direction: column; gap: 8px; }
+.planreview h3 { margin: 6px 0 0; font-size: .95rem; color: #c9d1dc; }
+.pcard { background: #1d2027; border: 1px solid var(--line2); border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.pcard.scene { border-color: #3a4560; }
+.prow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.prow .name { font-weight: 600; min-width: 120px; flex: 1; }
+.pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 8px; }
+.pfields { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.pf { display: inline-flex; align-items: center; gap: 5px; font-size: .85rem; }
+.pf > span:first-child { color: #8f99a8; }
+.pf input.wide { min-width: 260px; flex: 1; }
+.pf input[type=color] { width: 30px; height: 22px; padding: 0; border: 1px solid var(--line2); background: none; }
+.padd { min-height: 60px; border-style: dashed; }
+.ptable { border-collapse: collapse; font-size: .82rem; width: 100%; }
+.ptable th { text-align: left; color: #8f99a8; font-weight: 500; padding: 3px 4px; white-space: nowrap; }
+.ptable td { padding: 2px 3px; border-top: 1px solid #2c313a; vertical-align: middle; }
+.ptable select, .ptable input { font-size: .8rem; max-width: 150px; }
+.ptable input.num { width: 58px; }
+.beats { overflow-x: auto; }
+.beatst td.line input { min-width: 220px; width: 100%; }
+.beatst td.line { min-width: 220px; }
+.beatst .to { display: inline-flex; gap: 2px; }
+.rowbtns { white-space: nowrap; }
+.novel { padding: 6px 9px; border-radius: 5px; border: 1px solid; display: flex; flex-direction: column; gap: 3px; }
+.novel button { align-self: flex-start; }
+.novel.good { border-color: #35513d; background: #1d2a22; }
+.novel.mid { border-color: #6a5a22; background: #2a2616; }
+.novel.bad { border-color: #6a3330; background: #2a1a1a; }
+.pfinal { border-top: 1px solid var(--line2); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 /* Toàn cảnh (overview) and timeline */
 .vstagebar { position: absolute; top: 46px; right: 10px; z-index: 5; display: flex; gap: 6px; align-items: center; background: rgba(22,24,29,.94); border: 1px solid var(--line2); border-radius: 6px; padding: 3px; }
 .vstage { font-size: .85rem; padding: 2px 4px; max-width: 220px; background: var(--panel3); color: var(--text); border: 1px solid var(--line2); border-radius: 4px; }
@@ -256,7 +301,8 @@ textarea.code { font: .92rem/1.5 Consolas, "Cascadia Mono", monospace; backgroun
 /* Giọng đọc (Breeze TTS) */
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 6px 0; }
 .tts-setup { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
-.tts-setup input[type=text] { grid-column: span 2; min-width: 0; }
+.tts-setup input[type=text], .tts-setup input[type=password] { min-width: 0; flex: 1; }
+.tts-eng { display: flex; flex-direction: column; gap: 4px; }
 .hint.ok { color: #7fcf9a; }
 .hint.warn { color: #e0b46a; }
 /* Nhật ký hiệu năng */

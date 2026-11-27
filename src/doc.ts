@@ -39,6 +39,8 @@ export interface SceneDoc {
   audio: AudioClip[];
   notes?: string;
   brief?: any;   // what the Kịch bản workspace built it from (idea, script, cast, background, voice)
+  plan?: any;    // the approved production plan (src/plan.ts) it was built from
+  chat?: Array<{ role: 'user' | 'ai'; text: string }>;   // the conversation that made the plan
 }
 
 // ------------------------------------------------------------------ properties per kind

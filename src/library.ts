@@ -15,7 +15,7 @@ import * as SC from 'engine/scenery.js';
 
 export interface LibItem { name: string; file: string; modified: number; data?: any; code?: string; error?: string }
 export interface CodeAsset { name: string; kind: 'prop' | 'set'; label: string; build?: (lib: any, opts: any) => any; error?: string; code: string }
-export const LIB = { characters: [] as LibItem[], backgrounds: [] as LibItem[], code: [] as LibItem[], cameras: [] as LibItem[], looks: [] as LibItem[], vfx: [] as LibItem[] };
+export const LIB = { characters: [] as LibItem[], backgrounds: [] as LibItem[], code: [] as LibItem[], cameras: [] as LibItem[], looks: [] as LibItem[], vfx: [] as LibItem[], plans: [] as LibItem[] };
 const assets = new Map<string, CodeAsset>();
 const listeners: Array<() => void> = [];
 export const onLibrary = (f: () => void) => listeners.push(f);
@@ -51,7 +51,7 @@ export function tryBuild(build: (lib: any, opts: any) => any, opts: any = {}) {
 export async function loadLibrary() {
   try {
     const r = await fetch('/api/library'); const j = await r.json();
-    LIB.characters = j.characters || []; LIB.backgrounds = j.backgrounds || []; LIB.code = j.code || []; LIB.cameras = j.cameras || []; LIB.looks = j.looks || []; LIB.vfx = j.vfx || [];
+    LIB.characters = j.characters || []; LIB.backgrounds = j.backgrounds || []; LIB.code = j.code || []; LIB.cameras = j.cameras || []; LIB.looks = j.looks || []; LIB.vfx = j.vfx || []; LIB.plans = j.plans || [];
   } catch (e) { console.warn('library', e); }
   assets.clear();
   for (const it of LIB.code) {
@@ -71,6 +71,7 @@ export const saveLibrary = {
   camera: (name: string, data: any) => put('cameras', name, JSON.stringify(data, null, 1)),
   look: (name: string, data: any) => put('looks', name, JSON.stringify(data, null, 1)),
   vfx: (name: string, code: string) => put('vfx', name, code),
+  plan: (name: string, data: any) => put('plans', name, JSON.stringify(data, null, 1)),
 };
 export const removeFromLibrary = (type: string, name: string) => fetch(`/api/library?type=${type}&name=${encodeURIComponent(name)}`, { method: 'DELETE' });
 export const safeName = (s: string) => String(s || '').replace(/[^\p{L}\p{N} _.\-()]/gu, '_').trim().slice(0, 60) || 'item';

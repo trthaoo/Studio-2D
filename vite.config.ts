@@ -5,13 +5,13 @@ import fs from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
 import { aiStatus, aiText, saveKey, findCli } from './scripts/ai';
-import { ttsStatus, ttsLine, saveTtsUrl } from './scripts/tts';
+import { ttsStatus, ttsLine, saveTtsConfig, elevenVoices } from './scripts/tts';
 
 const ROOT = __dirname;
 const PROJECTS = path.join(ROOT, 'Projects');
 const EXPORTS = path.join(ROOT, 'Exports');
 const LIBRARY = path.join(ROOT, 'Library');
-const LIB_TYPES: Record<string, string> = { characters: '.json', backgrounds: '.json', code: '.js', cameras: '.json', looks: '.json', vfx: '.js' };
+const LIB_TYPES: Record<string, string> = { characters: '.json', backgrounds: '.json', code: '.js', cameras: '.json', looks: '.json', vfx: '.js', plans: '.json' };   // plans: fingerprints of approved videos (variety)
 const PORT = 5200;
 const safe = (s: string) => String(s || '').replace(/[^\p{L}\p{N} _.\-()]/gu, '_').trim().slice(0, 80);
 
@@ -159,9 +159,12 @@ function studioApi(): Plugin {
             }
             // ---- Breeze TTS (scripts/tts.ts)
             case 'GET /api/tts/status': return json(res, await ttsStatus());
-            case 'PUT /api/tts/config': {
-              try { saveTtsUrl(String(JSON.parse((await body(req)).toString('utf8')).url || '')); } catch (e: any) { return json(res, { error: e.message }, 400); }
+            case 'PUT /api/tts/config': {   // { engine?, url?, elevenKey?, elevenModel? }; the key is kept on this machine only
+              try { saveTtsConfig(JSON.parse((await body(req)).toString('utf8'))); } catch (e: any) { return json(res, { error: e.message }, 400); }
               return json(res, await ttsStatus());
+            }
+            case 'GET /api/tts/voices': {
+              try { return json(res, await elevenVoices()); } catch (e: any) { return json(res, { error: e.message }, 502); }
             }
             case 'POST /api/tts/line': {   // ?name=<project>, body { text, instruction, ref, refText, seed, cfg }
               if (!name || !fs.existsSync(dir)) return json(res, { error: 'no such project' }, 404);

@@ -62,7 +62,7 @@ async function render() {
         h('section', { class: 'wsec' }, h('div', { class: 'wsec-h' }, 'Tách layer'),
           h('label', { class: 'radio' }, h('input', { type: 'checkbox', checked: layers, onchange: (e: any) => { layers = e.target.checked; } }), 'Tách mỗi nhân vật, xe, đồ vật ra một file riêng có nền trong suốt'),
           h('div', { class: 'hint' }, 'Ra thêm thư mục layers: nền (00_background.mp4), mỗi object một file .mov ProRes 4444 có alpha, phụ đề riêng, và manifest.json. Ghép chồng lại được đúng video gốc. Chậm hơn xuất thường vài lần.')),
-        h('section', { class: 'wsec' }, h('div', { class: 'wsec-h' }, 'Giọng đọc (Breeze TTS)'),
+        h('section', { class: 'wsec' }, h('div', { class: 'wsec-h' }, 'Giọng đọc (ElevenLabs hoặc Breeze TTS)'),
           h('label', { class: 'radio' }, h('input', { type: 'checkbox', checked: voices, onchange: (e: any) => { voices = e.target.checked; try { localStorage.setItem('2ds.ttsOnRender', voices ? '1' : '0'); } catch { /* private window */ } } }),
             `Tạo giọng cho mọi câu thoại trước khi xuất (${speakers().reduce((a, o) => a + (o.tracks.say || []).filter((k) => String(k.v || '').trim()).length, 0)} câu)`),
           h('div', { class: 'hint' }, 'Mỗi nhân vật dùng giọng chọn ở thẻ Mặt. Câu nào không đổi thì dùng lại giọng đã tạo, không gọi máy chủ lại. Giọng nằm trên hàng Âm thanh, sửa được như mọi đoạn âm thanh khác.'),

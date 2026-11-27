@@ -146,6 +146,20 @@ The user presses **Render Video** (or File > Render video + layers). Or: `node s
 with the studio running. Out: `Exports/<name>/<name>.mp4`; with layers, `Exports/<name>/layers/`: `00_background.mp4`,
 one ProRes 4444 `.mov` with alpha per character / car / prop, `99_captions.mov`, `manifest.json`.
 
+**Plans (Kịch bản > Chat với AI).** The user chats with the AI (OpenAI / Anthropic / Claude Code, scripts/ai.ts); it
+returns a production plan (`src/plan.ts`: cast looks, scenes with set + options, sky, `light` preset, `look` shader,
+props, blocking, and beats: who, line, expr, arms, action, shot id, on, with, move, transition, fx). The user edits
+every field in the review, then "Dựng" builds it (`buildFromPlan`: a stage per scene, a camera per beat, cuts,
+captions) or "Duyệt và xuất video" builds and renders. The plan is kept in scene.json (`plan`, `chat`) and
+`Projects/<name>/plan.json`; its fingerprint goes to `Library/plans/<name>.json`, and the next plans are told to
+differ from the recent ones (sets, lighting, shader, opening shot, shot order, looks). When you make a video by hand,
+also vary these: never reuse the last videos' combination.
+
+**Voices: ElevenLabs or Breeze TTS 2.** The engine is chosen per machine (Xuất video > Giọng đọc, or a character's Mặt
+tab), saved in `~/.2d-studio/tts.json` with the ElevenLabs key (never in the project). ElevenLabs: `params.voice.eleven`
+= a voice id of the account (none = one picked per character), `speed` 0.7–1.2; models eleven_flash_v2_5 / v3 / v4
+(all speak Vietnamese).
+
 **Voices (Breeze TTS 2).** A character's lines (`say` keys) can be spoken by Breeze TTS 2, which runs as its own server
 (Linux + NVIDIA GPU 12 GB+: `python -m breeze_infer.api BreezeBlue/breeze-tts-2 --host 0.0.0.0 --port 7860`); the
 studio only stores its address (`~/.2d-studio/tts.json` or `BREEZE_TTS_URL`). Voice per character in
