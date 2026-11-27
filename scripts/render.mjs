@@ -85,7 +85,9 @@ try {
   const clips = (info.audio || []).filter((a) => fs.existsSync(path.join(ROOT, 'Projects', safe(name), a.file)));
   if (clips.length) {
     const ins = clips.flatMap((a) => ['-i', path.join(ROOT, 'Projects', safe(name), a.file)]);
-    const fil = clips.map((a, i) => `[${i + 1}:a]atrim=start=${Math.max(0, from - a.start)},adelay=${Math.round(Math.max(0, a.start - from) * 1000)}:all=1,volume=${a.gain || 0}dB[a${i}]`).join(';')
+    // offset / dur: clips cut or trimmed on the timeline use only part of their file
+    const trim = (a) => { const off = a.offset || 0, s = off + Math.max(0, from - a.start); return `atrim=start=${s}${a.dur != null ? `:end=${off + a.dur}` : ''},asetpts=PTS-STARTPTS`; };
+    const fil = clips.map((a, i) => `[${i + 1}:a]${trim(a)},adelay=${Math.round(Math.max(0, a.start - from) * 1000)}:all=1,volume=${a.gain || 0}dB[a${i}]`).join(';')
       + `;${clips.map((_, i) => `[a${i}]`).join('')}amix=inputs=${clips.length}:normalize=0:duration=longest[mix]`;
     await ff(['-i', silent, ...ins, '-filter_complex', fil, '-map', '0:v', '-map', '[mix]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-t', String(to - from), '-movflags', '+faststart', out]).done;
     fs.rmSync(silent);

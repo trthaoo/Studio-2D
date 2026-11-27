@@ -243,6 +243,11 @@ textarea.code { font: .92rem/1.5 Consolas, "Cascadia Mono", monospace; backgroun
 .modal .title { font-weight: 600; font-size: 1.08rem; }
 .modal .row { justify-content: flex-end; margin: 0; }
 .modal.help { width: min(640px, 94vw); }
+/* Toàn cảnh (overview) and timeline */
+.vstagebar { position: absolute; top: 46px; right: 10px; z-index: 5; display: flex; gap: 6px; align-items: center; background: rgba(22,24,29,.94); border: 1px solid var(--line2); border-radius: 6px; padding: 3px; }
+.vstage { font-size: .85rem; padding: 2px 4px; max-width: 220px; background: var(--panel3); color: var(--text); border: 1px solid var(--line2); border-radius: 4px; }
+.keyshelp { cursor: help; text-decoration: underline dotted; margin-right: 6px; }
+.tlzoom { width: 110px; }
 /* Cùng một người (nhân vật ở nhiều cảnh) */
 .person { margin: 6px 0 8px; padding: 7px 9px; border-radius: 5px; font-size: .88rem; border: 1px solid; }
 .person .row { margin: 6px 0 0; }

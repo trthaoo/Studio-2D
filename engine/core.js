@@ -290,8 +290,11 @@ export const FULL_QUALITY = Object.freeze({ scale: 1, msaa: 4, ao: 12, dof: 48, 
 export const QUALITY = { ...FULL_QUALITY };
 export let RW = W, RH = H;
 export function setQuality(q) {
-  const n = { ...QUALITY, ...q }; n.scale = clamp(n.scale, 0.2, 1);
-  const w = Math.max(8, Math.round(W * n.scale / 8) * 8), h = Math.round(w * H / W / 8) * 8;   // multiples of 8: the half and quarter buffers stay exact
+  const n = { ...QUALITY, w: undefined, h: undefined, ...q }; n.scale = clamp(n.scale, 0.2, 1);
+  // w / h: any size and shape (the studio's wide overview); otherwise 9:16 at `scale`. Multiples of 8: the half and
+  // quarter buffers stay exact.
+  const r8 = (v) => Math.max(8, Math.round(v / 8) * 8);
+  const w = n.w && n.h ? r8(n.w) : r8(W * n.scale), h = n.w && n.h ? r8(n.h) : Math.round(w * H / W / 8) * 8;
   if (w !== RW || h !== RH) {
     RW = w; RH = h; renderer.setSize(w, h, false);
     for (const t of [worldRT, normRT, inkRT, idRT]) t.setSize(w, h);
@@ -301,7 +304,7 @@ export function setQuality(q) {
   }
   if (n.msaa !== worldRT.samples) { worldRT.samples = n.msaa; worldRT.dispose(); }
   const d = paintMat.defines; if (d.AO_N !== n.ao || d.DOF_N !== n.dof) { d.AO_N = n.ao; d.DOF_N = Math.max(4, n.dof); paintMat.needsUpdate = true; }
-  Object.assign(QUALITY, n); QUALITY.scale = RW / W;
+  Object.assign(QUALITY, n); QUALITY.scale = RH / H;   // pixel sizes (ink, blur) follow the height, as the field of view does
 }
 export function fullQuality(fn) {
   const keep = { ...QUALITY }; setQuality(FULL_QUALITY);

@@ -4,7 +4,7 @@ import { loadLibrary } from './library';
 import { S, emit, on, openProject, save, doUndo, doRedo, setTime, select, selObj, edit, toast, snapT } from './state';
 import { rt, setView, redraw, perfInfo } from './ui/viewport';
 import { fullQuality } from 'engine/core.js';
-import { zoom, fit } from './ui/timeline';
+import { zoom, fit, splitAtPlayhead, trimAtPlayhead, jumpEdit, clipSelected } from './ui/timeline';
 import { showStart, duplicate, deleteSelection, pollRender } from './ui/panels';
 import { onRenderChanged } from './ui/workspaces';
 import { setValue, valueAt, normalize, SceneDoc, lookMismatches } from './doc';
@@ -21,6 +21,14 @@ window.addEventListener('keydown', (e) => {
   if (ctrl && k === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
   if (ctrl && (k === 'y' || k === 'r')) { e.preventDefault(); doRedo(); return; }
   if (ctrl && k === 'd') { e.preventDefault(); const o = selObj(); if (o) duplicate(o); return; }
+  // CapCut keys: Ctrl/Cmd+B split, Q / W delete left / right of the playhead, Up / Down edit points,
+  // Ctrl/Cmd + / - zoom the timeline, Shift+Z fit it
+  if (ctrl && k === 'b') { e.preventDefault(); splitAtPlayhead(); return; }
+  if (ctrl && (k === '=' || k === '+')) { e.preventDefault(); zoom(1.4); return; }
+  if (ctrl && (k === '-' || k === '_')) { e.preventDefault(); zoom(1 / 1.4); return; }
+  if (e.shiftKey && k === 'z' && !ctrl) { e.preventDefault(); fit(); return; }
+  if (!ctrl && (k === 'q' || k === 'w') && S.focus === 'timeline' && clipSelected()) { e.preventDefault(); trimAtPlayhead(k === 'q' ? 'L' : 'R'); return; }
+  if (k === 'arrowup' || k === 'arrowdown') { e.preventDefault(); jumpEdit(k === 'arrowdown' ? 1 : -1); return; }
   if (k === ' ') { e.preventDefault(); S.playing = !S.playing; emit('play'); return; }
   if (k === 'arrowleft') { e.preventDefault(); setTime(snapT(S.t - (e.shiftKey ? 1 : 1 / S.doc.fps))); return; }
   if (k === 'arrowright') { e.preventDefault(); setTime(snapT(S.t + (e.shiftKey ? 1 : 1 / S.doc.fps))); return; }

@@ -23,7 +23,7 @@ export interface SceneObject {
 export interface Stage { id: string; name: string; mood: 'day' | 'dusk' | 'night' | 'rain'; paint?: Record<string, any>; lightPreset?: string; light?: Record<string, any>; look?: string }
 export interface Cut { t: number; camera: string; dissolve?: number }   // dissolve: frames (5..18)
 export interface Caption { t: number; text: string }
-export interface AudioClip { id: string; file: string; start: number; gain?: number; name?: string; tts?: string }   // tts: id of the character whose line this is (made by Breeze TTS, replaced when made again)
+export interface AudioClip { id: string; file: string; start: number; gain?: number; name?: string; tts?: string; offset?: number; dur?: number }   // offset: seconds skipped at the file's start; dur: length used (cut / trimmed clips)   // tts: id of the character whose line this is (made by Breeze TTS, replaced when made again)
 
 export interface SceneDoc {
   version: 1;
@@ -241,6 +241,45 @@ export function normalize(doc: any): SceneDoc {
   doc.cuts.sort((a: Cut, b: Cut) => a.t - b.t);
   doc.captions.sort((a: Caption, b: Caption) => a.t - b.t);
   return doc as SceneDoc;
+}
+
+// ------------------------------------------------------------------ clips (the timeline's blocks)
+// An object's clips are the spans where it is visible (its `visible` track); no track = one clip over the whole
+// video. Two clips that touch are two `true` keys in a row (a split). Moving a clip moves every key inside it.
+export interface Seg { a: number; b: number }
+export function segmentsOf(o: SceneObject, dur: number): Seg[] {
+  const ks = o.tracks.visible;
+  if (!ks?.length) return [{ a: 0, b: dur }];
+  // before its first key a track holds the first key's value; an "on" key after an "on" key is a split
+  const out: Seg[] = []; let cur: number | null = ks[0].v !== false ? 0 : null;
+  for (const k of ks) {
+    if (k.v !== false) { if (cur == null) cur = k.t; else if (k.t > cur + 1e-4) { out.push({ a: cur, b: k.t }); cur = k.t; } }
+    else if (cur != null) { out.push({ a: cur, b: k.t }); cur = null; }
+  }
+  if (cur != null) out.push({ a: cur, b: Math.max(dur, cur + 0.1) });
+  return out.filter((s) => s.b - s.a > 1e-4);
+}
+/** Rewrite the `visible` track from clip spans (sorted, not overlapping). */
+export function writeSegments(o: SceneObject, segs: Seg[], dur: number) {
+  segs = segs.filter((s) => s.b - s.a > 1e-4).sort((x, y) => x.a - y.a);
+  if (segs.length === 1 && segs[0].a <= 1e-4 && segs[0].b >= dur - 1e-4) { delete o.tracks.visible; return; }
+  const keys: Key[] = [];
+  if (!segs.length || segs[0].a > 1e-4) keys.push({ t: 0, v: false });
+  segs.forEach((s, i) => {
+    keys.push({ t: r3(s.a), v: true });
+    const nx = segs[i + 1];
+    if (s.b < dur - 1e-4 && !(nx && Math.abs(nx.a - s.b) < 1e-4)) keys.push({ t: r3(s.b), v: false });
+  });
+  o.tracks.visible = keys;
+}
+const r3 = (x: number) => Math.round(x * 1000) / 1000;
+/** Move every key of an object that lies in [a, b) by dt (not `visible`, which writeSegments owns). */
+export function shiftKeysIn(o: SceneObject, a: number, b: number, dt: number, last = false) {
+  for (const [k, ks] of Object.entries(o.tracks)) {
+    if (k === 'visible') continue;
+    for (const q of ks) if (q.t >= a - 1e-6 && (q.t < b - 1e-6 || (last && q.t <= b + 1e-6))) q.t = r3(Math.max(0, q.t + dt));
+    ks.sort((x, y) => x.t - y.t);
+  }
 }
 
 // ------------------------------------------------------------------ one person in several stages

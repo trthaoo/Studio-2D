@@ -5,6 +5,7 @@ import { Runtime, Part } from '../runtime';
 import { S, on, emit, select, selObj, edit, beginGesture, endGesture, changed, checkpoint, setTime, toast } from '../state';
 import { applyValue, valueAt, activeCut, JOINTS, JOINT_VI, Joint, Vec3, SceneObject } from '../doc';
 import { audioPlay, audioPause, audioSync } from './audio';
+import { clipSelected } from './timeline';
 import { h, ask, fmtTime } from './dom';
 import { captionBox } from 'engine/captions.js';
 import { setQuality, QUALITY, RW, RH } from 'engine/core.js';
@@ -28,8 +29,8 @@ const TOOLS: Array<{ id: Tool; label: string; key: string; hint: string }> = [
 ];
 const CAM_HINT = 'Kéo để xoay camera quanh điểm nhìn. Kéo chuột phải hoặc Shift + kéo để dịch khung. Lăn chuột để tiến, lùi.';
 export function setTool(t: Tool) { S.tool = t; if (S.ws !== 'scene') { S.ws = 'scene'; emit('ws'); } toolbar(); redraw(); }
-const tbar = h('div', { class: 'vtools' }), hint = h('div', { class: 'vhint' }), modeBadge = h('div', { class: 'vmode' });
-wrap.append(tbar, hint, modeBadge);
+const tbar = h('div', { class: 'vtools' }), hint = h('div', { class: 'vhint' }), modeBadge = h('div', { class: 'vmode' }), stageBar = h('div', { class: 'vstagebar' });
+wrap.append(tbar, hint, modeBadge, stageBar);
 /** In the Camera workspace the view looks through the camera being edited (picked, or the one cut to at the playhead). */
 export function viewedCam(): SceneObject | null {
   const sel = selObj(); if (sel?.kind === 'camera') return sel;
@@ -42,8 +43,15 @@ function toolbar() {
     hint.textContent = CAM_HINT;
   } else {
     tbar.replaceChildren(...TOOLS.map((t) => h('button', { class: 'vtool' + (S.tool === t.id ? ' on' : ''), title: `${t.label} (phím ${t.key})`, onclick: () => setTool(t.id) }, t.label, h('span', { class: 'kbd' }, t.key))));
-    hint.textContent = (S.view === 'free' ? 'Đang nhìn tự do, không phải khung video. ' : '') + TOOLS.find((t) => t.id === S.tool)!.hint;
+    hint.textContent = S.view === 'free'
+      ? 'Toàn cảnh: kéo chuột phải để xoay, Shift hoặc chuột giữa để dịch, lăn để tiến lùi. Bấm vào camera để chọn, kéo nó hoặc chấm điểm nhìn để dời. Bấm khung nhỏ để về khung video.'
+      : TOOLS.find((t) => t.id === S.tool)!.hint;
   }
+  // the overview: which stage, and fit it
+  stageBar.style.display = S.view === 'free' && S.ws !== 'camera' ? '' : 'none';
+  if (S.view === 'free') stageBar.replaceChildren(
+    h('select', { class: 'vstage', title: 'Cảnh (sân khấu) đang xem', onchange: (e: any) => setFreeStage(e.target.value) }, ...S.doc.stages.map((s) => h('option', { value: s.id, selected: s.id === rt.freeStage }, `${s.name} (${S.doc.objects.filter((o) => o.kind === 'camera' && o.stage === s.id).length} camera)`))),
+    h('button', { class: 'vtool', title: 'Nhìn hết cả cảnh', onclick: frameStage }, 'Nhìn hết cảnh'));
   modeBadge.className = 'vmode ' + S.apply;
   modeBadge.textContent = S.apply === 'all' ? 'Sửa cho cả video' : 'Sửa từ playhead (keyframe)';
   rt.forceCam = S.ws === 'camera' ? viewedCam()?.id || null : null;
@@ -60,13 +68,14 @@ function placeFree() {
   free.cam.position.set(t.x + Math.sin(yaw) * Math.cos(pitch) * dist, t.y + Math.sin(pitch) * dist, t.z + Math.cos(yaw) * Math.cos(pitch) * dist);
   free.cam.lookAt(t); free.cam.updateMatrixWorld(true);
 }
+let seenFree = false;
 export function setView(v: 'camera' | 'free') {
   S.view = v;
   if (v === 'free') {
     const sel = selObj(); const cut = activeCut(S.doc, S.t).cur; const cam = cut && S.doc.objects.find((o) => o.id === cut.camera);
-    rt.freeStage = sel?.stage || cam?.stage || S.doc.stages[0]?.id || null;
-    if (cam) { const p = valueAt(cam, 'pos', S.t) as Vec3, tg = valueAt(cam, 'target', S.t) as Vec3; free.target.set(...tg); const d = new THREE.Vector3(...p).sub(free.target); free.dist = Math.max(1, d.length() * 1.6); free.yaw = Math.atan2(d.x, d.z); free.pitch = Math.max(0.05, Math.asin(d.y / d.length())); }
-    placeFree(); rt.freeCam = free.cam;
+    const stage = sel?.stage || cam?.stage || S.doc.stages[0]?.id || null, fresh = stage !== rt.freeStage || !seenFree;
+    rt.freeStage = stage; rt.freeCam = free.cam;
+    if (fresh) { seenFree = true; requestAnimationFrame(() => { layout(); frameStage(); }); } else placeFree();   // first time on this stage: the whole of it
   } else rt.freeCam = null;
   emit('play'); toolbar(); redraw();
 }
@@ -108,7 +117,18 @@ let fps = 0, fpsN = 0, fpsT = 0;
 let lastDraw = 0, drewStill = true, vsync = 16.7;
 /** Resolution of the frame as shown (device pixels): never render more than this. */
 const baseScale = () => Math.min(1, Math.max(0.25, (S.doc.height * scale) / 1920 * 1.1));
-function useLevel(i: number) { const L = LEVELS[i]; setQuality({ scale: baseScale() * L.k, msaa: L.msaa, ao: L.ao, dof: L.dof, shadow: L.shadow }); }
+function useLevel(i: number) {
+  const L = LEVELS[i], q = { msaa: L.msaa, ao: L.ao, dof: L.dof, shadow: L.shadow };
+  if (S.view === 'free') {   // the overview fills the whole area, at most ~1400 px on its long side
+    const R = viewRect(), f = Math.min(1, 1400 / Math.max(R.w, R.h)) * L.k;
+    setQuality({ ...q, scale: 1, w: R.w * f, h: R.h * f });
+  } else setQuality({ ...q, scale: baseScale() * L.k });
+}
+/** Where the picture is drawn on the canvas (device px): the 9:16 video frame, or the whole area in the overview. */
+function viewRect() {
+  if (S.view === 'free') { const dpr = window.devicePixelRatio || 1, top = 44 * dpr, bottom = 30 * dpr; return { x: 0, y: top, w: cv.width, h: Math.max(10, cv.height - top - bottom) }; }
+  return { x: ox, y: oy, w: S.doc.width * scale, h: S.doc.height * scale };
+}
 /** Frame times while moving: step the level up or down once a second. */
 function measure(ts: number, interval: number) {
   if (qMode !== 'auto') return;
@@ -158,28 +178,30 @@ function loop(ts: number) {
   const since = lastDraw ? ts - lastDraw : 0;
   lastDraw = ts; drewStill = still;
   const c0 = performance.now();
+  const R = viewRect();
   try {
+    if (S.view === 'free') { free.cam.aspect = R.w / R.h; free.cam.updateProjectionMatrix(); drawPip(); }
     rt.draw(S.t, { captions: true });
     msg.textContent = rt.errors.length ? 'Lỗi: ' + rt.errors.join(' · ') : '';
   } catch (e: any) { console.error(e); msg.textContent = 'Lỗi: ' + e.message; }
   ctx.fillStyle = '#16181d'; ctx.fillRect(0, 0, cv.width, cv.height);
-  ctx.drawImage(rt.frame, ox, oy, S.doc.width * scale, S.doc.height * scale);
-  ctx.strokeStyle = S.view === 'free' ? '#4fa3ff' : '#2a2e36'; ctx.lineWidth = S.view === 'free' ? 2 : 1; ctx.strokeRect(ox - 0.5, oy - 0.5, S.doc.width * scale + 1, S.doc.height * scale + 1);
-  ctx.save(); ctx.beginPath(); ctx.rect(ox - 12, oy - 12, S.doc.width * scale + 24, S.doc.height * scale + 24); ctx.clip();
+  ctx.drawImage(rt.frame, R.x, R.y, R.w, R.h);
+  ctx.strokeStyle = S.view === 'free' ? '#4fa3ff' : '#2a2e36'; ctx.lineWidth = S.view === 'free' ? 2 : 1; ctx.strokeRect(R.x - 0.5, R.y - 0.5, R.w + 1, R.h + 1);
+  ctx.save(); ctx.beginPath(); ctx.rect(R.x - 12, R.y - 12, R.w + 24, R.h + 24); ctx.clip();
+  if (S.view === 'free') gizmos();
   overlays();
   ctx.restore();
+  if (S.view === 'free') pipOverlay(R);
   perf.frame({ interval: moving && since < 1000 ? since : 0, cpu: performance.now() - c0, moving, playing: S.playing, level: usedLevel, w: RW, h: RH, vsync });
 }
 requestAnimationFrame(loop);
 on('time', redraw); on('doc', () => { rt.sync(S.doc); layout(); }); on('select', redraw);
 on('play', () => { if (S.playing) audioPlay(S.t); else audioPause(); });
 
-const toCv = (x: number, y: number) => [ox + x * scale, oy + y * scale];
 function project(p: THREE.Vector3): [number, number, boolean] | null {
   const cam = rt.camera; if (!cam) return null;
-  const v = p.clone().project(cam); const behind = v.z > 1;
-  const [x, y] = toCv((v.x + 1) / 2 * S.doc.width, (1 - v.y) / 2 * S.doc.height);
-  return [x, y, behind];
+  const v = p.clone().project(cam); const behind = v.z > 1 || v.z < -1, R = viewRect();
+  return [R.x + (v.x + 1) / 2 * R.w, R.y + (1 - v.y) / 2 * R.h, behind];
 }
 
 interface Handle { j: Joint; x: number; y: number; world: THREE.Vector3 }
@@ -189,7 +211,7 @@ let capHover = -1;
 const capsNow = () => S.doc.captions.map((c) => [c.t, c.text] as [number, string]);
 /** The caption card under a canvas point (device px), in frame units, or null. */
 function capHit(cx: number, cy: number) {
-  if (!S.doc.captions.length || !rt.doc) return null;
+  if (!S.doc.captions.length || !rt.doc || S.view === 'free') return null;
   const b = captionBox(rt.ctx, capsNow(), S.t); if (!b) return null;
   const fx = (cx - ox) / scale, fy = (cy - oy) / scale;
   return fx >= b.x0 && fx <= b.x1 && fy >= b.y0 && fy <= b.y1 ? b : null;
@@ -201,6 +223,7 @@ async function editCaption(i: number) {
   if (s != null && s !== c.text) edit(() => { c.text = s; });
 }
 function captionOutline() {
+  if (S.view === 'free') return;
   const b = capHover >= 0 || S.selCap >= 0 ? captionBox(rt.ctx, capsNow(), S.t) : null;
   if (!b || (b.index !== capHover && b.index !== S.selCap)) return;
   const dpr = window.devicePixelRatio || 1;
@@ -217,8 +240,9 @@ function overlays() {
   const dpr = window.devicePixelRatio || 1;
   const b = rt.builtOf(o.id); if (!b || !b.root.visible) return;
   if (rt.lastStage && b.obj.stage !== rt.lastStage.def.id) return;
-  if (o.kind !== 'set') {
-    const box = new THREE.Box3().setFromObject(b.root, true);
+  const piece = o.kind === 'set' && S.setPart >= 0 ? rt.partsOf(o.id)[S.setPart] : null;
+  if (o.kind !== 'set' || piece) {
+    const box = new THREE.Box3().setFromObject(piece ? piece.obj : b.root, true);
     if (!box.isEmpty()) {
       let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, ok = false;
       for (let i = 0; i < 8; i++) {
@@ -228,7 +252,7 @@ function overlays() {
       }
       if (ok) {
         ctx.save(); ctx.setLineDash([6 * dpr, 4 * dpr]); ctx.strokeStyle = '#ffb02e'; ctx.lineWidth = 1.5 * dpr; ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
-        ctx.setLineDash([]); ctx.font = `600 ${12 * dpr}px system-ui`; const label = o.name + (o.kind === 'char' ? ` › ${TAB_NAME[S.tab] || ''}` : '');
+        ctx.setLineDash([]); ctx.font = `600 ${12 * dpr}px system-ui`; const label = o.name + (o.kind === 'char' ? ` › ${TAB_NAME[S.tab] || ''}` : piece ? ` › ${piece.name}` : '');
         const tw = ctx.measureText(label).width; ctx.fillStyle = '#ffb02e'; ctx.fillRect(x0, y0 - 18 * dpr, tw + 10 * dpr, 17 * dpr); ctx.fillStyle = '#1a1206'; ctx.fillText(label, x0 + 5 * dpr, y0 - 5 * dpr); ctx.restore();
       }
     }
@@ -252,13 +276,101 @@ function overlays() {
 }
 export const TAB_NAME: Record<string, string> = { pos: 'Vị trí', pose: 'Dáng & tay', face: 'Mặt', hair: 'Tóc', clothes: 'Quần áo', acc: 'Phụ kiện' };
 
+// ---------------------------------------------------------------- overview (Toàn cảnh): cameras, paths, picture in picture
+// The whole stage from outside, as wide as the area: every camera of the stage as a small frustum (blue = the one the
+// video cuts to now, orange = selected), its path over the video, where it looks (dot), the paths of characters and
+// cars, and in the corner what the video shows at the playhead. Click a camera to select it; drag it (or its dot) to
+// move it (Shift: up / down); with "Sửa từ đây" on this makes a keyframe.
+interface Giz { id: string; kind: 'cam' | 'target'; x: number; y: number }
+let gizHits: Giz[] = [];
+const v3 = (a: Vec3) => new THREE.Vector3(a[0], a[1], a[2]);
+function gizmos() {
+  gizHits = [];
+  const stage = rt.freeStage, dpr = window.devicePixelRatio || 1, cur = activeCut(S.doc, S.t).cur?.camera;
+  const line = (pts: Array<[number, number, boolean] | null>, color: string, width = 1.5, dash: number[] = []) => {
+    ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = width * dpr; ctx.setLineDash(dash.map((d) => d * dpr)); ctx.beginPath(); let on = false;
+    for (const p of pts) { if (!p || p[2]) { on = false; continue; } if (on) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]); on = true; }
+    ctx.stroke(); ctx.restore();
+  };
+  const dur = S.doc.duration, step = Math.max(dur / 160, 1 / 30);
+  const pathOf = (o: SceneObject, key: string) => { const ks = o.tracks[key]; if (!ks || ks.length < 2) return null; const pts: Array<[number, number, boolean] | null> = []; for (let t = 0; t <= dur + 1e-6; t += step) pts.push(project(v3(valueAt(o, key, t) as Vec3))); return pts; };
+  // characters and cars that move: their path on the floor
+  for (const o of S.doc.objects) {
+    if (o.stage !== stage || (o.kind !== 'char' && o.kind !== 'car') || o.parent) continue;
+    const pts = pathOf(o, 'pos'); if (!pts) continue;
+    line(pts, o.id === S.sel ? 'rgba(255,176,46,0.9)' : 'rgba(255,255,255,0.45)', 1.5, [5, 4]);
+    const now = project(v3(valueAt(o, 'pos', S.t) as Vec3)); if (now && !now[2]) { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(now[0], now[1], 3 * dpr, 0, 7); ctx.fill(); }
+  }
+  for (const c of S.doc.objects) {
+    if (c.kind !== 'camera' || c.stage !== stage) continue;
+    const sel = c.id === S.sel, live = c.id === cur, col = sel ? '#ffb02e' : live ? '#4fd1ff' : '#c9ced8';
+    const p = v3(valueAt(c, 'pos', S.t) as Vec3), tg = v3(valueAt(c, 'target', S.t) as Vec3), fov = (valueAt(c, 'fov', S.t) as number) * Math.PI / 180;
+    const path = pathOf(c, 'pos'); if (path) line(path, col, 1.2, [3, 4]);
+    // frustum: the 9:16 picture at a fixed distance in front of the lens
+    const dir = tg.clone().sub(p).normalize(), right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize(), up = new THREE.Vector3().crossVectors(right, dir);
+    const L = Math.max(0.35, free.dist * 0.07), hh = Math.tan(fov / 2) * L, ww = hh * 9 / 16, far = p.clone().addScaledVector(dir, L);
+    const C = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => project(far.clone().addScaledVector(right, a * ww).addScaledVector(up, b * hh)));
+    const P = project(p);
+    for (const q of C) line([P, q], col, sel || live ? 1.8 : 1.2);
+    line([...C, C[0]], col, sel || live ? 2 : 1.2);
+    const top = project(far.clone().addScaledVector(up, hh * 1.35)); if (top && C[2] && C[3] && !top[2]) { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(top[0], top[1]); ctx.lineTo(C[2]![0], C[2]![1]); ctx.lineTo(C[3]![0], C[3]![1]); ctx.fill(); }   // which way is up
+    if (sel) { const T = project(tg); line([P, T], 'rgba(255,176,46,0.7)', 1, [2, 3]); if (T && !T[2]) { ctx.fillStyle = '#ffb02e'; ctx.beginPath(); ctx.arc(T[0], T[1], 5 * dpr, 0, 7); ctx.fill(); gizHits.push({ id: c.id, kind: 'target', x: T[0], y: T[1] }); } }
+    if (P && !P[2]) {
+      ctx.fillStyle = col; ctx.beginPath(); ctx.roundRect(P[0] - 7 * dpr, P[1] - 5 * dpr, 14 * dpr, 10 * dpr, 2 * dpr); ctx.fill(); ctx.strokeStyle = '#0d0f12'; ctx.lineWidth = dpr; ctx.stroke();
+      ctx.font = `600 ${11 * dpr}px system-ui`; const s = c.name + (live ? ' · đang quay' : ''), tw = ctx.measureText(s).width;
+      ctx.fillStyle = 'rgba(10,12,16,0.8)'; ctx.fillRect(P[0] + 9 * dpr, P[1] - 8 * dpr, tw + 8 * dpr, 16 * dpr); ctx.fillStyle = col; ctx.fillText(s, P[0] + 13 * dpr, P[1] + 4 * dpr);
+      gizHits.push({ id: c.id, kind: 'cam', x: P[0], y: P[1] });
+    }
+  }
+}
+// picture in picture: the video (or the selected camera) at the playhead, redrawn at most 4 times a second while playing
+const pip = document.createElement('canvas'); let pipAt = 0, pipLabel = '';
+function drawPip() {
+  const now = performance.now(); if (S.playing && now - pipAt < 250) return; pipAt = now;
+  const sel = selObj(), camId = sel?.kind === 'camera' ? sel.id : null;
+  const keepQ = { ...QUALITY }, keepFree = rt.freeCam, keepForce = rt.forceCam;
+  try {
+    setQuality({ scale: 0.24, msaa: 0, ao: 0, dof: 8, shadow: QUALITY.shadow });
+    rt.freeCam = null; rt.forceCam = camId;
+    const f = rt.draw(S.t, { captions: true });
+    pip.width = f.width; pip.height = f.height; pip.getContext('2d')!.drawImage(f, 0, 0);
+    pipLabel = camId ? `Nhìn qua ${sel!.name}` : 'Khung video lúc này';
+  } finally { rt.freeCam = keepFree; rt.forceCam = keepForce; setQuality(keepQ); }
+}
+let pipRect = { x: 0, y: 0, w: 0, h: 0 };
+function pipOverlay(R: { x: number; y: number; w: number; h: number }) {
+  if (!pip.width) return;
+  const dpr = window.devicePixelRatio || 1, h = Math.min(R.h * 0.42, 300 * dpr), w = h * 9 / 16, x = R.x + R.w - w - 12 * dpr, y = R.y + R.h - h - 12 * dpr;
+  pipRect = { x, y, w, h };
+  ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 12 * dpr; ctx.fillStyle = '#000'; ctx.fillRect(x, y, w, h); ctx.restore();
+  ctx.drawImage(pip, x, y, w, h); ctx.strokeStyle = '#4fd1ff'; ctx.lineWidth = 1.5 * dpr; ctx.strokeRect(x, y, w, h);
+  ctx.font = `600 ${11 * dpr}px system-ui`; const lw = ctx.measureText(pipLabel).width + 12 * dpr;
+  ctx.fillStyle = 'rgba(10,12,16,0.85)'; ctx.fillRect(x + w - lw, y - 18 * dpr, lw, 18 * dpr); ctx.fillStyle = '#cfe9ff'; ctx.fillText(pipLabel, x + w - lw + 6 * dpr, y - 5 * dpr);
+}
+/** Fit the whole stage (sets, characters, cameras) in the overview. */
+export function frameStage() {
+  const stage = rt.freeStage; if (!stage) return;
+  const box = new THREE.Box3();
+  for (const o of S.doc.objects) {
+    if (o.stage !== stage) continue;
+    if (o.kind === 'camera') { box.expandByPoint(v3(valueAt(o, 'pos', S.t) as Vec3)); continue; }
+    const b = rt.builtOf(o.id); if (!b) continue;
+    const bb = new THREE.Box3().setFromObject(b.root); if (!bb.isEmpty() && bb.getSize(new THREE.Vector3()).length() < 120) box.union(bb);
+  }
+  if (box.isEmpty()) box.setFromCenterAndSize(new THREE.Vector3(0, 1, 0), new THREE.Vector3(6, 2, 6));
+  const size = box.getSize(new THREE.Vector3()).length();
+  free.target.copy(box.getCenter(new THREE.Vector3())); free.dist = Math.max(3, size * 0.95 / Math.tan((free.cam.fov * Math.PI / 180) / 2) * 0.5);
+  free.yaw = 0.55; free.pitch = 0.5; placeFree(); redraw();
+}
+function setFreeStage(id: string) { rt.freeStage = id; frameStage(); toolbar(); }
+
 // ---------------------------------------------------------------- input
-interface Drag { kind: 'move' | 'rotate' | 'joint' | 'orbit' | 'pan' | 'camOrbit' | 'camPan'; x: number; y: number; joint?: Joint; obj?: SceneObject; plane?: THREE.Plane; start?: THREE.Vector3; startPos?: Vec3; startOff?: Vec3; startRot?: number; vertical?: boolean; cam?: SceneObject; camPos?: Vec3; camTg?: Vec3; root?: THREE.Object3D }
+interface Drag { kind: 'move' | 'piece' | 'rotate' | 'joint' | 'orbit' | 'pan' | 'camOrbit' | 'camPan' | 'gizmo' | 'gizmoTarget'; x: number; y: number; joint?: Joint; obj?: SceneObject; plane?: THREE.Plane; start?: THREE.Vector3; startPos?: Vec3; startOff?: Vec3; startRot?: number; vertical?: boolean; cam?: SceneObject; camPos?: Vec3; camTg?: Vec3; root?: THREE.Object3D }
 let drag: Drag | null = null;
 
 function ndc(e: PointerEvent | WheelEvent | MouseEvent) {
-  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
-  const x = ((e.clientX - r.left) * dpr - ox) / (S.doc.width * scale), y = ((e.clientY - r.top) * dpr - oy) / (S.doc.height * scale);
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1, R = viewRect();
+  const x = ((e.clientX - r.left) * dpr - R.x) / R.w, y = ((e.clientY - r.top) * dpr - R.y) / R.h;
   return { nx: x * 2 - 1, ny: 1 - y * 2, cx: (e.clientX - r.left) * dpr, cy: (e.clientY - r.top) * dpr };
 }
 function rayAt(nx: number, ny: number) { const ray = new THREE.Raycaster(); ray.setFromCamera(new THREE.Vector2(nx, ny), rt.camera!); return ray.ray; }
@@ -268,9 +380,26 @@ const set = (o: SceneObject, key: string, v: any) => applyValue(o, key, S.t, v, 
 
 cv.addEventListener('contextmenu', (e) => e.preventDefault());
 cv.addEventListener('pointerdown', (e) => {
+  S.focus = 'view';
   if (S.playing) { S.playing = false; emit('play'); }
   const { nx, ny, cx, cy } = ndc(e); cv.setPointerCapture(e.pointerId);
   const camTool = S.ws === 'camera';
+  if (S.view === 'free' && e.button === 0) {
+    // the small video picture: back to the video frame
+    if (cx >= pipRect.x && cx <= pipRect.x + pipRect.w && cy >= pipRect.y && cy <= pipRect.y + pipRect.h) { setView('camera'); return; }
+    // a camera (or the point it looks at) in the overview: select it, drag to move it
+    const dpr = window.devicePixelRatio || 1, g = [...gizHits].reverse().find((q) => Math.hypot(q.x - cx, q.y - cy) < 11 * dpr);
+    if (g) {
+      const cam = S.doc.objects.find((o) => o.id === g.id)!; if (S.sel !== cam.id) select(cam.id);
+      const key = g.kind === 'cam' ? 'pos' : 'target', at = v3(valueAt(cam, key, S.t) as Vec3), vertical = e.shiftKey;
+      const camDir = rt.camera!.getWorldDirection(new THREE.Vector3());
+      const plane = vertical ? new THREE.Plane().setFromNormalAndCoplanarPoint(new THREE.Vector3(camDir.x, 0, camDir.z).normalize(), at) : new THREE.Plane(new THREE.Vector3(0, 1, 0), -at.y);
+      const start = rayAt(nx, ny).intersectPlane(plane, new THREE.Vector3()); if (!start) return;
+      beginGesture(); checkpoint();
+      drag = { kind: g.kind === 'cam' ? 'gizmo' : 'gizmoTarget', x: e.clientX, y: e.clientY, obj: cam, plane, start, startPos: at.toArray() as Vec3, vertical };
+      return;
+    }
+  }
   // looking around in the free view: right / middle drag always, left drag with the camera tool
   if (S.view === 'free' && (e.button === 2 || e.button === 1 || (camTool && e.button === 0))) { drag = { kind: e.button === 1 || e.shiftKey || (camTool && e.button === 2) ? 'pan' : 'orbit', x: e.clientX, y: e.clientY }; return; }
   // moving the video camera
@@ -298,9 +427,18 @@ cv.addEventListener('pointerdown', (e) => {
   if (id !== S.sel) select(id);
   const p = selObj();
   if (p?.kind === 'char' && hit?.part && S.tool === 'select') { S.tab = PART_TAB[hit.part]; emit('select'); }
+  if (p?.kind === 'set') { const np = hit?.piece ?? -1; if (np !== S.setPart) { S.setPart = np; emit('select'); } }   // a piece of the set: shelf, window, wall...
   if (!p || p.locked || p.kind === 'camera' || !hit) return;
   const b = rt.builtOf(p.id); if (!b) return;
-  if (S.tool === 'move') {
+  if (S.tool === 'move' && p.kind === 'set' && S.setPart >= 0) {   // drag one piece of the set
+    const pc = rt.partsOf(p.id)[S.setPart]; if (!pc) return;
+    const wp = hit.point, vertical = e.shiftKey, camDir = rt.camera.getWorldDirection(new THREE.Vector3());
+    const plane = vertical ? new THREE.Plane().setFromNormalAndCoplanarPoint(new THREE.Vector3(camDir.x, 0, camDir.z).normalize(), wp) : new THREE.Plane(new THREE.Vector3(0, 1, 0), -wp.y);
+    const start = rayAt(nx, ny).intersectPlane(plane, new THREE.Vector3()); if (!start) return;
+    beginGesture(); checkpoint();
+    const cur = (p.params.parts?.[S.setPart]?.pos || [0, 0, 0]) as Vec3;
+    drag = { kind: 'piece', x: e.clientX, y: e.clientY, obj: p, plane, start, startPos: [...cur] as Vec3, vertical, root: pc.obj.parent as any };
+  } else if (S.tool === 'move') {
     const wp = hit.point, camDir = rt.camera.getWorldDirection(new THREE.Vector3()), vertical = e.shiftKey;
     const plane = vertical ? new THREE.Plane().setFromNormalAndCoplanarPoint(new THREE.Vector3(camDir.x, 0, camDir.z).normalize(), wp) : new THREE.Plane(new THREE.Vector3(0, 1, 0), -wp.y);
     const start = rayAt(nx, ny).intersectPlane(plane, new THREE.Vector3()); if (!start) return;
@@ -342,7 +480,16 @@ cv.addEventListener('pointermove', (e) => {
   }
   const hit = rayAt(nx, ny).intersectPlane(drag.plane!, new THREE.Vector3()); if (!hit) return;
   const o = drag.obj!;
-  if (drag.kind === 'move') {
+  if (drag.kind === 'gizmo' || drag.kind === 'gizmoTarget') {   // a camera or its look-at point, in the overview
+    const d = hit.clone().sub(drag.start!), sp = drag.startPos!;
+    const v: Vec3 = drag.vertical ? [sp[0], +(sp[1] + d.y).toFixed(3), sp[2]] : [+(sp[0] + d.x).toFixed(3), sp[1], +(sp[2] + d.z).toFixed(3)];
+    set(o, drag.kind === 'gizmo' ? 'pos' : 'target', v); changed();
+  } else if (drag.kind === 'piece') {   // offset of a set piece, in the set's own space
+    const parent = drag.root!;
+    const a = parent.worldToLocal(drag.start!.clone()), c = parent.worldToLocal(hit.clone()), d = c.sub(a), sp = drag.startPos!;
+    const v: Vec3 = drag.vertical ? [sp[0], +(sp[1] + d.y).toFixed(3), sp[2]] : [+(sp[0] + d.x).toFixed(3), sp[1], +(sp[2] + d.z).toFixed(3)];
+    const parts = (o.params.parts ||= {}); parts[S.setPart] = { ...(parts[S.setPart] || {}), pos: v }; changed();
+  } else if (drag.kind === 'move') {
     const parent = drag.root!.parent!;
     const a = parent.worldToLocal(drag.start!.clone()), c = parent.worldToLocal(hit.clone()), d = c.sub(a), sp = drag.startPos!;
     const v: Vec3 = drag.vertical ? [sp[0], +(sp[1] + d.y).toFixed(3), sp[2]] : [+(sp[0] + d.x).toFixed(3), sp[1], +(sp[2] + d.z).toFixed(3)];
@@ -370,6 +517,7 @@ cv.addEventListener('wheel', (e) => {
 window.addEventListener('keydown', (e) => {
   if ((e.target as HTMLElement).closest?.('input,textarea,select,[contenteditable]') || e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key.toLowerCase();
+  if ((k === 'q' || k === 'w') && S.focus === 'timeline' && clipSelected()) return;   // CapCut Q / W on the timeline (main.ts)
   const t = TOOLS.find((q) => q.key.toLowerCase() === k); if (t) { setTool(t.id); return; }
   if (k === 't') { S.ws = 'camera'; emit('ws'); return; }
   if (k === 'f') {

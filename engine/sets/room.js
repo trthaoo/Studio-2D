@@ -55,22 +55,24 @@ export function addRoom(scene, o = {}) {
   const G = new THREE.Group(); G.position.set(o.x ?? 0, 0, o.z ?? 0); scene.add(G);
   const { w, d, h } = o, wallM = flat(o.wall, 0.9), trimM = flat(0xf4f1ea, 0.6);
   const fl = new THREE.Mesh(new THREE.PlaneGeometry(w, d + 2), new THREE.MeshStandardMaterial({ map: floorTex(o.floor, o.floorColor), roughness: o.floor === 'tile' ? 0.4 : 0.9 }));
-  fl.rotation.x = -Math.PI / 2; fl.position.z = -d / 2 + 1; fl.receiveShadow = true; G.add(fl);
+  fl.rotation.x = -Math.PI / 2; fl.position.z = -d / 2 + 1; fl.receiveShadow = true; fl.name = 'Sàn'; G.add(fl);
   // back wall with a window hole
   const ww = Math.min(2.2, w * 0.42), wh = 1.3, wy = 1.45, wxc = o.kind === 'office' ? w * 0.18 : 0;
   const sh = new THREE.Shape(); sh.moveTo(-w / 2, 0); sh.lineTo(w / 2, 0); sh.lineTo(w / 2, h); sh.lineTo(-w / 2, h); sh.closePath();
   if (o.window) { const hole = new THREE.Path(); hole.moveTo(wxc - ww / 2, wy - wh / 2); hole.lineTo(wxc + ww / 2, wy - wh / 2); hole.lineTo(wxc + ww / 2, wy + wh / 2); hole.lineTo(wxc - ww / 2, wy + wh / 2); hole.closePath(); sh.holes.push(hole); }
-  const back = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: 0.12, bevelEnabled: false }), wallM); back.position.z = -d - 0.12; back.receiveShadow = back.castShadow = true; G.add(back);
-  for (const s of [-1, 1]) G.add(box(0.12, h, d + 0.6, wallM, s * (w / 2 + 0.06), h / 2, -d / 2 + 0.3));
-  if (o.ceiling) { const ce = box(w + 0.24, 0.1, d + 0.6, flat(o.ceilingColor ?? 0xdedad0, 0.95), 0, h + 0.05, -d / 2 + 0.3); ce.castShadow = false; G.add(ce); }
-  G.add(box(w, 0.12, 0.03, trimM, 0, 0.06, -d + 0.015)); for (const s of [-1, 1]) G.add(box(0.03, 0.12, d + 0.6, trimM, s * (w / 2 - 0.015), 0.06, -d / 2 + 0.3));
+  const back = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: 0.12, bevelEnabled: false }), wallM); back.position.z = -d - 0.12; back.receiveShadow = back.castShadow = true; back.name = 'Tường sau'; G.add(back);
+  for (const s of [-1, 1]) { const sw = box(0.12, h, d + 0.6, wallM, s * (w / 2 + 0.06), h / 2, -d / 2 + 0.3); sw.name = s < 0 ? 'Tường trái' : 'Tường phải'; G.add(sw); }
+  if (o.ceiling) { const ce = box(w + 0.24, 0.1, d + 0.6, flat(o.ceilingColor ?? 0xdedad0, 0.95), 0, h + 0.05, -d / 2 + 0.3); ce.castShadow = false; ce.name = 'Trần'; G.add(ce); }
+  { const sk = box(w, 0.12, 0.03, trimM, 0, 0.06, -d + 0.015); sk.name = 'Chân tường sau'; G.add(sk); } for (const s of [-1, 1]) { const sk = box(0.03, 0.12, d + 0.6, trimM, s * (w / 2 - 0.015), 0.06, -d / 2 + 0.3); sk.name = 'Chân tường'; G.add(sk); }
   const at = { center: V3(0, 0, -d / 2), front: V3(0, 0, -0.3), window: V3(wxc, wy, -d), wallSlots: [] }, items = {};
   if (o.window) {
     const view = new THREE.Mesh(new THREE.PlaneGeometry(ww * 2.4, wh * 2.4), new THREE.MeshBasicMaterial({ map: viewTex(o.view, o.seed ?? 4, o.night && o.view !== 'skylineNight'), toneMapped: false, fog: false }));
-    view.position.set(wxc, wy, -d - 1.2); G.add(view);
-    G.add(box(ww + 0.12, 0.08, 0.2, trimM, wxc, wy - wh / 2 - 0.04, -d + 0.04)); G.add(box(ww + 0.12, 0.06, 0.05, trimM, wxc, wy + wh / 2 + 0.03, -d - 0.02));
-    for (const s of [-1, 1]) G.add(box(0.06, wh, 0.05, trimM, wxc + s * (ww / 2 + 0.03), wy, -d - 0.02));
-    G.add(box(0.04, wh, 0.03, trimM, wxc, wy, -d - 0.05)); G.add(box(ww, 0.04, 0.03, trimM, wxc, wy, -d - 0.05));
+    view.position.set(wxc, wy, -d - 1.2); view.name = 'Cảnh ngoài cửa sổ'; G.add(view);
+    // the window frame is one piece (sill, head, jambs, cross bars), so it moves and recolours together
+    const wf = new THREE.Group(); wf.name = 'Khung cửa sổ'; G.add(wf);
+    wf.add(box(ww + 0.12, 0.08, 0.2, trimM, wxc, wy - wh / 2 - 0.04, -d + 0.04)); wf.add(box(ww + 0.12, 0.06, 0.05, trimM, wxc, wy + wh / 2 + 0.03, -d - 0.02));
+    for (const s of [-1, 1]) wf.add(box(0.06, wh, 0.05, trimM, wxc + s * (ww / 2 + 0.03), wy, -d - 0.02));
+    wf.add(box(0.04, wh, 0.03, trimM, wxc, wy, -d - 0.05)); wf.add(box(ww, 0.04, 0.03, trimM, wxc, wy, -d - 0.05));
     if (!o.night && o.view !== 'skylineNight') { const l = new THREE.PointLight(0xfff4e0, 6, 6, 1.4); l.position.set(wxc, wy, -d + 0.6); G.add(l); }
   }
   if (o.light) { const l = new THREE.PointLight(0xfff0dc, 14, 9, 1.3); l.position.set(0, h * 0.55, -d * 0.35); G.add(l); }
@@ -78,7 +80,7 @@ export function addRoom(scene, o = {}) {
   const slotXs = o.window ? [-w * 0.34, -w * 0.18 + (wxc ? -0.3 : 0), wxc + ww / 2 + 0.45].filter((x) => x - 0.25 > -w / 2 && x + 0.25 < w / 2) : [-w * 0.3, 0, w * 0.3];
   for (const x of slotXs) at.wallSlots.push(V3(x, 1.5, -d + 0.02));
   for (const s of [-1, 1]) at.wallSlots.push(V3(s * (w / 2 - 0.01), 1.5, -d * 0.5));
-  const placeFrames = (list) => list.forEach((who, i) => { const sl = at.wallSlots[i % at.wallSlots.length]; const f = P.frame({ photoOf: who }); f.position.copy(sl); if (Math.abs(sl.x) > w / 2 - 0.1) { f.rotation.y = -Math.sign(sl.x) * Math.PI / 2; } G.add(f); (items.frames ||= []).push(f); });
+  const placeFrames = (list) => list.forEach((who, i) => { const sl = at.wallSlots[i % at.wallSlots.length]; const f = P.frame({ photoOf: who }); f.position.copy(sl); if (Math.abs(sl.x) > w / 2 - 0.1) { f.rotation.y = -Math.sign(sl.x) * Math.PI / 2; } f.name = 'Khung ảnh ' + (i + 1); G.add(f); (items.frames ||= []).push(f); });
   const add = (k, obj, x, y, z, ry = 0) => { obj.position.set(x, y, z); obj.rotation.y = ry; G.add(obj); items[k] = obj; return obj; };
   // dressing by kind
   if (o.kind === 'office') {

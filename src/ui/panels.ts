@@ -174,7 +174,7 @@ function renderMenu() {
     ]),
     menuButton('Xem', () => [
       { label: 'Khung hình video (C)', checked: S.view === 'camera', action: () => setView('camera') },
-      { label: 'Nhìn tự do quanh sân khấu (V)', checked: S.view === 'free', action: () => setView('free') },
+      { label: 'Toàn cảnh: nhìn từ bên ngoài, thấy mọi camera (V)', checked: S.view === 'free', action: () => setView('free') },
       { label: 'Vừa timeline', action: fit },
       { sep: true, label: '' },
       { label: 'Nhật ký hiệu năng...', action: () => showPerf(perfSession, (m) => toast(m)) },
@@ -189,7 +189,7 @@ function renderMenu() {
     h('span', { class: 'grow' }),
     viewing ? h('div', { class: 'viewtoggle' },
       h('button', { class: S.view === 'camera' ? 'on' : '', onclick: () => setView('camera'), title: 'Đúng khung hình video sẽ xuất ra (C)' }, 'Khung video'),
-      h('button', { class: S.view === 'free' ? 'on' : '', onclick: () => setView('free'), title: 'Đi vòng quanh sân khấu (V). Kéo chuột phải để xoay, lăn để zoom.' }, 'Nhìn tự do')) : null,
+      h('button', { class: S.view === 'free' ? 'on' : '', onclick: () => setView('free'), title: 'Nhìn cả cảnh từ bên ngoài (V): mọi camera, đường đi của camera và nhân vật, chọn cảnh, kéo camera để sửa.' }, 'Toàn cảnh')) : null,
     rs && rs.state === 'running' ? h('span', { class: 'rstat', onclick: () => setWorkspace('export') }, `Đang xuất ${rs.progress}`) : null,
     h('button', { class: 'primary', onclick: () => { setWorkspace('export'); if (!(rs && rs.state === 'running')) startRender(); }, title: 'Xuất MP4 (xem tiến độ ở tab Xuất video)' }, 'Xuất video'),
   );

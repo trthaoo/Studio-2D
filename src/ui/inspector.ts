@@ -222,9 +222,37 @@ function fxBody(o: SceneObject): any[] {
 }
 
 // ---------------------------------------------------------------- other kinds
+/** A set's pieces (floor, walls, window, shelf, desk...): pick one, then move, turn, resize, recolour or hide it. */
+function piecesSection(o: SceneObject) {
+  const parts = rt.partsOf(o.id), E: Record<string, any> = o.params.parts || {};
+  const i = S.setPart, pc = parts[i], e = E[i] || {};
+  const put = (patch: Record<string, any>) => { const n = { ...(o.params.parts?.[i] || {}), ...patch }; for (const k of Object.keys(n)) if (n[k] == null) delete n[k]; const all = { ...(o.params.parts || {}) }; if (Object.keys(n).length) all[i] = n; else delete all[i]; if (Object.keys(all).length) o.params.parts = all; else delete o.params.parts; };
+  const num = (label: string, get: () => number, setV: (v: number) => void, mn: number, mx: number, step = 0.01) => slider(o, { key: 'part', label, type: 'number', def: 0, min: mn, max: mx, step }, label, get, setV);
+  const edited = Object.keys(E).map(Number).filter((k) => parts[k]);
+  const pick = (k: number) => { S.setPart = k; emit('select'); render(); };
+  return [
+    section(pc ? `Đồ vật: ${pc.name}` : 'Đồ vật trong bối cảnh',
+      pc ? null : note('Bấm vào một thứ trong bối cảnh (kệ, cửa sổ, tường, bàn...) ở khung hình để chỉnh riêng nó, hoặc chọn trong danh sách. Dùng công cụ Di chuyển (W) để kéo nó.'),
+      h('div', { class: 'srow' }, h('label', {}, 'Chọn'), h('select', { class: 'span2', onchange: (ev: any) => pick(+ev.target.value) },
+        h('option', { value: -1, selected: i < 0 }, '— cả bối cảnh —'), ...parts.map((p, k) => h('option', { value: k, selected: k === i }, p.name + (E[k] ? ' (đã chỉnh)' : ''))))),
+      ...(pc ? [
+        num('Sang trái/phải', () => e.pos?.[0] ?? 0, (v) => put({ pos: [+v.toFixed(3), e.pos?.[1] ?? 0, e.pos?.[2] ?? 0] }), -4, 4),
+        num('Lên/xuống', () => e.pos?.[1] ?? 0, (v) => put({ pos: [e.pos?.[0] ?? 0, +v.toFixed(3), e.pos?.[2] ?? 0] }), -3, 3),
+        num('Ra trước/sau', () => e.pos?.[2] ?? 0, (v) => put({ pos: [e.pos?.[0] ?? 0, e.pos?.[1] ?? 0, +v.toFixed(3)] }), -4, 4),
+        num('Xoay (°)', () => e.rotY ?? 0, (v) => put({ rotY: Math.round(v) }), -180, 180, 1),
+        num('Kích thước', () => e.scale ?? 1, (v) => put({ scale: +v.toFixed(3) }), 0.2, 3),
+        h('div', { class: 'srow' }, h('label', {}, 'Màu'), h('input', { type: 'color', value: e.color || '#888888', onchange: (ev: any) => edit(() => put({ color: ev.target.value })) }), h('span'), h('span'), e.color ? h('button', { class: 'rbtn', onclick: () => edit(() => put({ color: undefined })) }, 'Bỏ') : h('span')),
+        pCheck(o, 'Ẩn đồ vật này', () => !!e.hidden, (v) => put({ hidden: v || undefined })),
+        h('div', { class: 'row' }, h('button', { onclick: () => edit(() => put({ pos: undefined, rotY: undefined, scale: undefined, color: undefined, hidden: undefined })) }, 'Về như ban đầu'), h('button', { onclick: () => pick(-1) }, 'Chọn cả bối cảnh')),
+      ] : []),
+      edited.length ? note(`Đã chỉnh: ${edited.map((k) => parts[k].name).join(', ')}. Áp dụng cho cả video.`) : null),
+  ];
+}
+
 function otherBody(o: SceneObject): any[] {
   const keys = PROPS[o.kind].map((d) => d.key);
-  const out: any[] = keys.map((k) => prop(o, k));
+  const out: any[] = o.kind === 'set' ? piecesSection(o) : [];
+  out.push(...keys.map((k) => prop(o, k)));
   const p = o.params;
   if (o.kind === 'car') out.push(section('Kiểu xe (cả video)', pSelect(o, 'type', 'Dáng xe', Object.keys(CAR_TYPES)), pColor(o, 'color', 'Màu sơn'), pSelect(o, 'interior', 'Nội thất', ['modern', 'old'], { modern: 'Hiện đại', old: 'Cổ' })));
   if (o.kind === 'prop') out.push(section('Đồ vật (cả video)', pSelect(o, 'type', 'Loại', PROP_NAMES)));

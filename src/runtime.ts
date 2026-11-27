@@ -30,6 +30,21 @@ interface Built {
   light?: THREE.PointLight;
   lastText?: string;
   pose?: PosePoints;        // last pose, in root space (for the pose handles)
+  parts?: SetPart[];        // a set's pieces (floor, walls, shelf, window...), each pickable and editable on its own
+}
+/** A piece of a set, with its place as built (params.parts[i] edits move / turn / scale / recolour / hide it). */
+export interface SetPart { obj: THREE.Object3D; name: string; pos: THREE.Vector3; ry: number; scale: THREE.Vector3 }
+export interface PartEdit { pos?: [number, number, number]; rotY?: number; scale?: number; hidden?: boolean; color?: string }
+const PART_VI: Record<string, string> = { desk: 'Bàn làm việc', chair: 'Ghế', chair2: 'Ghế', phone: 'Điện thoại bàn', laptop: 'Laptop', plate: 'Biển tên', cabinet: 'Tủ', plant: 'Cây cảnh',
+  counter: 'Quầy', fridge: 'Tủ lạnh', table: 'Bàn', sofa: 'Sofa', rug: 'Thảm', coffeeTable: 'Bàn trà', tv: 'TV', shelfL: 'Kệ trái', shelfR: 'Kệ phải', sign: 'Biển' };
+/** The pieces of a set: the children of its main group (going down through single wrapper groups). */
+function setPieces(inner: any, g: THREE.Object3D): SetPart[] {
+  let pr: THREE.Object3D = inner?.group?.isObject3D ? inner.group : inner?.isObject3D ? inner : g;
+  while (pr.children.length === 1 && (pr.children[0] as any).isGroup) pr = pr.children[0];
+  const named = new Map<THREE.Object3D, string>();
+  for (const [k, v] of Object.entries(inner?.items || {})) if (!Array.isArray(v) && (v as any)?.isObject3D) named.set(v as THREE.Object3D, PART_VI[k] || k);
+  let n = 0;
+  return pr.children.filter((c) => !(c as any).isLight).map((c) => ({ obj: c, name: named.get(c) || c.name || `Mảnh ${++n}`, pos: c.position.clone(), ry: c.rotation.y, scale: c.scale.clone() }));
 }
 interface BuiltStage { def: Stage; sig: string; st: any }
 
@@ -67,11 +82,12 @@ export class Runtime {
     for (const id of [...this.built.keys()]) if (!ids.has(id)) this.drop(id);
     for (const o of doc.objects) {
       if (o.kind === 'camera') continue;
-      const sig = JSON.stringify([o.kind, o.kind === 'char' ? lookParams(doc, o) : o.params, o.stage, o.parent || null, o.params.type === 'code' ? (o.kind === 'fx' ? vfxCodeOf(o.params.code) ?? null : codeAsset(o.params.code)?.code ?? null) : null]);
+      const { parts: _edits, ...noParts } = o.params;   // edits of a set's pieces apply live, without a rebuild
+      const sig = JSON.stringify([o.kind, o.kind === 'char' ? lookParams(doc, o) : o.kind === 'set' ? noParts : o.params, o.stage, o.parent || null, o.params.type === 'code' ? (o.kind === 'fx' ? vfxCodeOf(o.params.code) ?? null : codeAsset(o.params.code)?.code ?? null) : null]);
       const b = this.built.get(o.id);
-      if (b && b.sig === sig) { b.obj = o; continue; }
+      if (b && b.sig === sig) { b.obj = o; this.applyParts(b); continue; }
       if (b) this.drop(o.id);
-      try { this.build(o, sig); } catch (e: any) { this.errors.push(`${o.name}: ${e.message}`); console.error(e); }
+      try { this.build(o, sig); const nb = this.built.get(o.id); if (nb) this.applyParts(nb); } catch (e: any) { this.errors.push(`${o.name}: ${e.message}`); console.error(e); }
     }
     // parents (second pass: a parent may be built after its child)
     for (const b of this.built.values()) {
@@ -134,8 +150,33 @@ export class Runtime {
       const g = new THREE.Group(); root.add(g);
       const L = lamp(g, 0, 0, 0, hexify(p)); light = L.light; inner = g;
     }
-    this.built.set(o.id, { obj: o, sig, root, inner, attach, light });
+    const parts = o.kind === 'set' ? setPieces(inner, root.children[0] || root) : undefined;
+    this.built.set(o.id, { obj: o, sig, root, inner, attach, light, parts });
   }
+
+  /** A set's piece edits (params.parts) on its built pieces: offset, turn, size, colour, hidden. */
+  private applyParts(b: Built) {
+    if (!b.parts) return;
+    const E: Record<string, PartEdit> = b.obj.params.parts || {};
+    b.parts.forEach((pt, i) => {
+      const e = E[i] || {}, o = pt.obj;
+      o.position.copy(pt.pos); if (e.pos) o.position.add(new THREE.Vector3(...e.pos));
+      o.rotation.y = pt.ry + (e.rotY || 0) * DEG;
+      o.scale.copy(pt.scale).multiplyScalar(e.scale ?? 1);
+      o.visible = !e.hidden;
+      if ((o.userData.tint || null) !== (e.color || null)) {
+        o.traverse((m: any) => {
+          if (!m.isMesh || !m.material || Array.isArray(m.material)) return;
+          m.userData.origMat ||= m.material;
+          if (e.color) { const c = m.userData.origMat.clone(); if (c.color) c.color.set(e.color); if (c.map && c.color) c.color.multiplyScalar(1); m.material = c; }
+          else m.material = m.userData.origMat;
+        });
+        o.userData.tint = e.color || null;
+      }
+    });
+  }
+  /** The pieces of a built set (for the inspector and the view). */
+  partsOf(id: string): SetPart[] { return this.built.get(id)?.parts || []; }
 
   // ---------------------------------------------------------------- one moment
   /** Object transforms and states at t (everything but the pose, which needs the camera). */
@@ -225,7 +266,7 @@ export class Runtime {
   aimCamera(st: any, camObj: SceneObject, t: number) {
     const cam: THREE.PerspectiveCamera = st.camera;
     const p = valueAt(camObj, 'pos', t) as Vec3, tg = valueAt(camObj, 'target', t) as Vec3;
-    cam.position.set(p[0], p[1], p[2]); cam.fov = valueAt(camObj, 'fov', t); cam.near = camObj.params.near ?? 0.05; cam.updateProjectionMatrix();
+    cam.position.set(p[0], p[1], p[2]); cam.fov = valueAt(camObj, 'fov', t); cam.near = camObj.params.near ?? 0.05; cam.aspect = W / H; cam.updateProjectionMatrix();
     cam.up.set(0, 1, 0); cam.lookAt(tg[0], tg[1], tg[2]); cam.rotateZ((valueAt(camObj, 'roll', t) as number) * DEG); cam.updateMatrixWorld(true);
     const dof = valueAt(camObj, 'dof', t) as number;
     st._dof = dof > 0 ? { cInf: dof, focus: Math.max(0.3, Math.hypot(tg[0] - p[0], tg[1] - p[1], tg[2] - p[2])), max: 24 } : null;
@@ -240,7 +281,7 @@ export class Runtime {
     if (camObj) this.aimCamera(st, camObj, t);
     else if (this.freeCam) {
       st.camera.position.copy(this.freeCam.position); st.camera.quaternion.copy(this.freeCam.quaternion);
-      st.camera.fov = this.freeCam.fov; st.camera.near = 0.05; st.camera.updateProjectionMatrix(); st.camera.updateMatrixWorld(true);
+      st.camera.fov = this.freeCam.fov; st.camera.near = 0.05; st.camera.aspect = RW / RH; st.camera.updateProjectionMatrix(); st.camera.updateMatrixWorld(true);
       st._dof = null; st.frame(); st.follow(this.freeCam.position.x, 0, this.freeCam.position.z - 6);
     }
     st.scene.updateMatrixWorld(true);
@@ -341,7 +382,7 @@ export class Runtime {
       }
       ctx.globalAlpha = 1; ctx.filter = 'none';
     }
-    if (o.captions !== false) this.drawCaptions(ctx, t);
+    if (o.captions !== false && !this.freeCam) this.drawCaptions(ctx, t);   // the overview is not the video frame
     return this.frame;
   }
 
@@ -358,10 +399,10 @@ export class Runtime {
   /** The doc object under a point of the frame (ndc -1..1). Things before sets; sets only when nothing else. */
   pick(nx: number, ny: number): string | null { return this.pickHit(nx, ny)?.id ?? null; }
   /** Same as pick, with the world point that was hit (to drag at that height). */
-  pickHit(nx: number, ny: number): { id: string; point: THREE.Vector3; part?: Part } | null {
+  pickHit(nx: number, ny: number): { id: string; point: THREE.Vector3; part?: Part; piece?: number } | null {
     const cam = this.camera, scene = this.scene; if (!cam || !scene) return null;
     const ray = new THREE.Raycaster(); ray.layers.enableAll(); ray.setFromCamera(new THREE.Vector2(nx, ny), cam);
-    let setHit: { id: string; point: THREE.Vector3 } | null = null;
+    let setHit: { id: string; point: THREE.Vector3; piece?: number } | null = null;
     for (const h of ray.intersectObject(scene, true)) {
       if ((h.object as any).isSprite) continue;
       const mat: any = (h.object as any).material; if (mat && !Array.isArray(mat) && mat.colorWrite === false) continue;
@@ -372,7 +413,10 @@ export class Runtime {
       if (!q) continue;
       const o = this.doc.objects.find((x) => x.id === q!.userData.docId);
       if (!o || o.locked) continue;
-      if (o.kind === 'set') { setHit ||= { id: o.id, point: h.point.clone() }; continue; }
+      if (o.kind === 'set') {   // which piece of the set (shelf, window, wall...)
+        if (!setHit) { const ps = this.built.get(o.id)?.parts || []; let piece: number | undefined; for (let a: THREE.Object3D | null = h.object; a && piece == null; a = a.parent) { const i = ps.findIndex((p) => p.obj === a); if (i >= 0) piece = i; } setHit = { id: o.id, point: h.point.clone(), piece }; }
+        continue;
+      }
       return { id: o.id, point: h.point.clone(), part: o.kind === 'char' ? this.charPart(o, h) : undefined };
     }
     return setHit;

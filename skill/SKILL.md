@@ -34,7 +34,7 @@ scene.json.
   "objects": [ ...SceneObject ],
   "cuts": [{ "t": 0, "camera": "cam1" }, { "t": 2.0, "camera": "cam2", "dissolve": 9 }],   // dissolve: frames (5–18)
   "captions": [{ "t": 0.6, "text": "Boss," }, { "t": 1.75, "text": "" }],                 // "" clears; 1–3 words a card (a longer card shrinks to fit the width)
-  "audio": [{ "id": "vo", "file": "audio/vo.wav", "start": 0, "gain": 0 }],               // files in Projects/<name>/audio/
+  "audio": [{ "id": "vo", "file": "audio/vo.wav", "start": 0, "gain": 0 }],               // files in Projects/<name>/audio/; a cut clip adds "offset" (s skipped in the file) and "dur" (s used)
   "notes": "free text"
 }
 ```
@@ -74,6 +74,15 @@ Units are metres. y is up. Characters are about 1.2 m tall. A character faces +x
 | `lamp` | `color`, `range`, `glow` | `pos`, `visible`, `intensity` |
 | `fx` (VFX) | `type`: smoke steam fire sparks magic rain snow confetti hearts bubbles (looping) / explosion dust impact splash pop flash (one-shot), or `code` with `code` = a file in Library/vfx; `follow` (a char id) + `at` (feet hips chest head leftHand rightHand); `color`, `size`, `seed`; code VFX: `loop`, `dur` | `pos` (offset from the followed spot, +z = where the character faces), `rotY`, `scale`, `visible` (one-shot and code effects START when it turns on: key false then true), `amount` (0 = off), `speed` |
 | `camera` | `near` | `pos`, `target` (look-at point), `fov` (vertical °, 30–60), `roll` (°), `dof` (lens blur px, 0 off; 8–14 on close-ups) |
+
+**Clips (the timeline).** An object's clips on the timeline are where its `visible` track is on (no track = one clip
+over the whole video); two `true` keys in a row are a split. Users cut, trim and move clips like in CapCut, and moving
+a clip moves the keys inside it.
+
+**Pieces of a set.** Every set is made of pieces (room: Sàn, Tường sau, Tường trái/phải, Trần, Cảnh ngoài cửa sổ,
+Khung cửa sổ, Bàn làm việc, Ghế, Laptop, Tủ, Cây cảnh, Khung ảnh 1–3...; their order is the build order). Edits per
+piece, for the whole video: `params.parts: { "<index>": { "pos": [dx, dy, dz], "rotY": deg, "scale": 1.2, "color": "#hex", "hidden": true } }`.
+Things standing on a piece (a laptop on the desk) are pieces of their own: move them together.
 
 Room layout (`addRoom`): open toward +z, back wall at z = −4.2 (default d), walls at x = ±2.6, office desk around
 z −2.3, standing room in front z −0.5 … −1.8. House: front faces +z at z 0, street at z 7–14. Highway: lanes at
@@ -161,7 +170,8 @@ The user works in a Vietnamese UI with workspace tabs in workflow order: Thư vi
 preview, saved backgrounds, code objects) → Kịch bản (from an idea, or clone a reference video: link or file →
 `Projects/<name>/ref/` with ref.mp4, sheet-NN.png, thumbs/, audio.wav, ref.json = cuts + lines with times; then cast,
 background, build the draft) → Dựng cảnh (tools Chọn Q / Di chuyển W / Xoay E / Tạo dáng R; right panel part tabs Vị trí, Dáng &
-tay, Mặt, Tóc, Quần áo, Phụ kiện) → Camera (look through a camera, edit it, list of cuts) → Thư viện (shared
+tay, Mặt, Tóc, Quần áo, Phụ kiện; "Toàn cảnh" = the stage from outside with every camera, paths and a small video
+picture; timeline like CapCut: blocks, Ctrl/Cmd+B split, Q / W delete left / right of the playhead) → Camera (look through a camera, edit it, list of cuts) → Thư viện (shared
 characters, backgrounds, code objects; code editor) → Xuất video (MP4, layers, past exports). A switch "Cả video" /
 "Từ … (keyframe)" decides whether a change is for the whole video or a key at the playhead. Answer in Vietnamese
 using those names. The UI uses no icons or emoji; keep it that way.

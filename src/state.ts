@@ -16,6 +16,10 @@ export const S = {
   sel: null as string | null,          // selected object id
   selKeys: [] as KeyRef[],             // selected keyframes
   selCut: -1, selCap: -1,
+  selAud: -1,                          // selected audio clip (index)
+  selSeg: null as { obj: string; a: number } | null,   // selected object clip on the timeline (its start time)
+  setPart: -1,                         // the selected piece of a set (index among its pieces), -1 = the whole set
+  focus: 'view' as 'view' | 'timeline',   // where the last click was: decides what Q / W / Delete act on
   t: 0,
   playing: false,
   autoKey: false,                      // (kept for the timeline) same as apply === 'key'
@@ -46,7 +50,7 @@ export function doRedo() { const s = redo.pop(); if (!s) return; undo.push(JSON.
 function fixSel() { if (S.sel && !S.doc.objects.find((o) => o.id === S.sel)) S.sel = null; S.selKeys = []; emit('select'); }
 
 // ---------------------------------------------------------------- selection / time
-export function select(id: string | null) { S.sel = id; S.selKeys = []; S.selCut = -1; S.selCap = -1; emit('select'); }
+export function select(id: string | null) { if (id !== S.sel) S.setPart = -1; S.sel = id; S.selKeys = []; S.selCut = -1; S.selCap = -1; S.selAud = -1; S.selSeg = null; emit('select'); }
 export function setTime(t: number) { S.t = Math.max(0, Math.min(S.doc.duration, t)); emit('time'); }
 export const selObj = () => S.doc.objects.find((o) => o.id === S.sel) || null;
 export const snapT = (t: number) => Math.round(t * S.doc.fps) / S.doc.fps;
