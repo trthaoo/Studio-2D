@@ -18,6 +18,9 @@ ai.json
 # reference videos downloaded for cloning (large, and not ours to redistribute)
 Projects/*/ref/
 
+# downloaded reference videos for style research (not ours to redistribute)
+Research/
+
 # performance logs (per machine; export from the studio to share)
 Logs/
 

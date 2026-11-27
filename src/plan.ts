@@ -7,8 +7,8 @@
 // the recent ones and must not repeat them; the review shows how different the plan is and what repeats.
 import { SceneDoc, SceneObject, Key, Vec3, normalize, EXPRS, ARMS } from './doc';
 import { LIGHTS, LOOKS } from './lighting';
-import { SHOTS, Shot, Move, MOVE_VI, shotKeys, Limit } from './cameraShots';
-import { LIB } from './library';
+import { SHOTS, Shot, Move, MOVE_VI, shotKeys, Limit, subjectAt } from './cameraShots';
+import { LIB, codeAssets } from './library';
 import { randomLook, rng, SHIRT_COLORS, PANTS_COLORS, SKIN_TONES } from './looks';
 import { HAIR_STYLES, BUILD_NAMES, OUTFIT_NAMES, ACC_NAMES } from 'engine/chars.js';
 import { PROPS as PROP_TYPES } from 'engine/props.js';
@@ -19,14 +19,14 @@ import { captionsFromWords } from 'engine/captions.js';
 // ------------------------------------------------------------------ the format
 export interface PlanLook { style: string; hair: string; hair2?: string; skin?: string; shirt: string; shirt2?: string; pants: string; outfit: string; build: string; acc: string[]; glasses?: boolean; R?: number }
 export interface PlanChar { name: string; library?: string; look: PlanLook; note?: string }
-export type SetType = 'room' | 'house' | 'highway' | 'floor' | 'library';
-export interface PlanSet { type: SetType; kind?: string; library?: string; wall?: string; floor?: string; floorColor?: string; view?: string; seed?: number; siding?: string; roofColor?: string; doorColor?: string; storeys?: number; color?: string }
+export type SetType = 'room' | 'house' | 'highway' | 'floor' | 'library' | 'code';
+export interface PlanSet { type: SetType; kind?: string; library?: string; code?: string; opts?: Record<string, any>; wall?: string; floor?: string; floorColor?: string; view?: string; seed?: number; siding?: string; roofColor?: string; doorColor?: string; storeys?: number; color?: string }
 export interface PlanProp { type: string; text?: string; x: number; z: number; rotY?: number; scale?: number }
 export interface PlanSpot { who: string; x: number; z: number; face: number }
 export type Action = 'none' | 'walk-in' | 'walk-out' | 'walk-to' | 'turn';
 export interface PlanBeat { who: string | null; line: string; expr: string; arms: string; action: Action; to?: [number, number]; shot: string; on: string | null; with: string | null; move: Move; speed?: number; transition: 'cut' | 'dissolve'; fx?: string }
 export interface PlanScene { id: string; name: string; sky: 'day' | 'dusk' | 'night' | 'rain'; light: string; look: string; set: PlanSet; props: PlanProp[]; blocking: PlanSpot[]; beats: PlanBeat[] }
-export interface Plan { version: 1; title: string; logline: string; pace: number; captionWords: number; cast: PlanChar[]; scenes: PlanScene[] }
+export interface Plan { version: 1; title: string; logline: string; pace: number; captionWords: number; cast: PlanChar[]; scenes: PlanScene[]; skill?: string; voice?: string }   // skill: the skill that wrote it; voice: narrator description
 
 // camera shots by short id (the built-in ones, in SHOTS order) and the ones saved in Library/cameras ("lib:<name>")
 export const SHOT_IDS = ['wide', 'medium', 'close', 'xclose', 'threequarter', 'side', 'low', 'high', 'dutch', 'behind', 'two', 'ots', 'pov', 'orbit', 'reveal', 'crane', 'handheld', 'follow'];
@@ -43,7 +43,10 @@ export const ROOM_KIND_VI: Record<string, string> = { office: 'Văn phòng', kit
 export const VIEWS = ['skyline', 'skylineNight', 'trees', 'street'];
 export const VIEW_VI: Record<string, string> = { skyline: 'Nhà cao tầng', skylineNight: 'Phố đêm', trees: 'Cây xanh', street: 'Đường phố' };
 export const FLOORS = ['wood', 'tile', 'carpet'];
-export const SET_VI: Record<SetType, string> = { room: 'Trong phòng', house: 'Trước nhà', highway: 'Lề đường cao tốc', floor: 'Sàn trống', library: 'Bối cảnh trong thư viện' };
+export const SET_VI: Record<SetType, string> = { room: 'Trong phòng', house: 'Trước nhà', highway: 'Lề đường cao tốc', floor: 'Sàn trống', library: 'Bối cảnh trong thư viện', code: 'Bối cảnh bằng code (thư viện)' };
+/** Sets and props made from code in Library/code (any place: a spaceship, a prison cell, a bank vault...). */
+export const codeSetNames = () => codeAssets().filter((a) => a.kind === 'set' && a.build).map((a) => a.name);
+export const codePropNames = () => codeAssets().filter((a) => a.kind === 'prop' && a.build).map((a) => 'code:' + a.name);
 export const ACTION_VI: Record<Action, string> = { none: 'Đứng tại chỗ', 'walk-in': 'Đi vào khung', 'walk-out': 'Đi ra khỏi khung', 'walk-to': 'Đi tới chỗ khác', turn: 'Quay về phía máy' };
 export const SKY_VI: Record<string, string> = { day: 'Ban ngày', dusk: 'Hoàng hôn', night: 'Ban đêm', rain: 'Trời mưa' };
 const STAND: Record<string, [number, number]> = { office: [0, -1.5], kitchen: [0, -1.2], living: [0, -1.3], shop: [0, -1.1], empty: [0, -1.6], house: [0, 3.2], highway: [0, 8.6], floor: [0, 0] };
@@ -77,8 +80,11 @@ export function cleanPlan(p: any): Plan {
   const who = (v: any) => (typeof v === 'string' && names.includes(v) ? v : null);
   const scenes: PlanScene[] = (Array.isArray(P.scenes) && P.scenes.length ? P.scenes : [{}]).slice(0, 6).map((s: any, si: number) => {
     const S = s || {}, st = S.set || {};
-    const type: SetType = pickOf(['room', 'house', 'highway', 'floor', 'library'] as SetType[], st.type, 'room');
+    let type: SetType = pickOf(['room', 'house', 'highway', 'floor', 'library', 'code'] as SetType[], st.type, 'room');
+    const codeSets = codeAssets().filter((a) => a.kind === 'set' && a.build).map((a) => a.name);
+    if (type === 'code' && !codeSets.includes(st.code)) type = 'room';   // a code set that is not in Library/code (yet): a room instead
     const set: PlanSet = { type };
+    if (type === 'code') { set.code = st.code; if (st.opts && typeof st.opts === 'object') set.opts = st.opts; }
     if (type === 'room') Object.assign(set, { kind: pickOf(ROOM_KINDS, st.kind, 'office'), wall: hexOk(st.wall, '#e8dcc0'), floor: pickOf(FLOORS, st.floor, 'wood'), floorColor: st.floorColor ? hexOk(st.floorColor, '#a8743e') : undefined, view: pickOf(VIEWS, st.view, 'skyline'), seed: Math.round(num(st.seed, 1, 9999, 1 + si)) });
     if (type === 'house') Object.assign(set, { seed: Math.round(num(st.seed, 1, 9999, 7)), siding: st.siding ? hexOk(st.siding, '#d8cfc0') : undefined, roofColor: st.roofColor ? hexOk(st.roofColor, '#5a4a44') : undefined, doorColor: st.doorColor ? hexOk(st.doorColor, '#a83a2a') : undefined, storeys: Math.round(num(st.storeys, 1, 2, 1)) });
     if (type === 'floor') set.color = hexOk(st.color, '#d9d2c0');
@@ -107,11 +113,12 @@ export function cleanPlan(p: any): Plan {
     return {
       id: `s${si + 1}`, name: str(S.name, `Cảnh ${si + 1}`).slice(0, 40), sky: pickOf(['day', 'dusk', 'night', 'rain'], S.sky, 'day') as PlanScene['sky'],
       light: pickOf(Object.keys(LIGHTS), S.light, 'studio'), look: pickOf(Object.keys(LOOKS), S.look, 'ink'), set,
-      props: (Array.isArray(S.props) ? S.props : []).slice(0, 12).filter((q: any) => (PROP_TYPES as string[]).includes(q?.type)).map((q: any) => ({ type: q.type, text: str(q.text) || undefined, x: num(q.x, -3, 3, 0), z: num(q.z, -2.5, BIG_PROPS.includes(q.type) ? -0.9 : 2.5, -0.5) /* big things stay behind the actors, never between them and the lens */, rotY: q.rotY != null ? num(q.rotY, -180, 180, 0) : undefined, scale: q.scale != null ? num(q.scale, 0.3, 3, 1) : undefined })),
+      props: (Array.isArray(S.props) ? S.props : []).slice(0, 16).filter((q: any) => (PROP_TYPES as string[]).includes(q?.type) || (typeof q?.type === 'string' && q.type.startsWith('code:') && codeAssets().some((a) => a.name === q.type.slice(5) && a.kind === 'prop' && a.build))).map((q: any) => ({ type: q.type, text: str(q.text) || undefined, x: num(q.x, -3, 3, 0), z: num(q.z, -2.5, BIG_PROPS.includes(q.type) ? -0.9 : 2.5, -0.5) /* big things stay behind the actors, never between them and the lens */, rotY: q.rotY != null ? num(q.rotY, -180, 180, 0) : undefined, scale: q.scale != null ? num(q.scale, 0.3, 3, 1) : undefined })),
       blocking, beats,
     };
   });
-  return { version: 1, title: str(P.title, 'Video mới').slice(0, 60), logline: str(P.logline).slice(0, 300), pace: num(P.pace, 2.6, 4.6, 3.6), captionWords: Math.round(num(P.captionWords, 1, 3, 2)), cast, scenes };
+  return { version: 1, title: str(P.title, 'Video mới').slice(0, 60), logline: str(P.logline).slice(0, 300), pace: num(P.pace, 2.6, 4.6, 3.6), captionWords: Math.round(num(P.captionWords, 1, 3, 2)), cast, scenes,
+    ...(str(P.skill) ? { skill: str(P.skill).slice(0, 60) } : {}), ...(str(P.voice) ? { voice: str(P.voice).slice(0, 200) } : {}) };
 }
 
 // ------------------------------------------------------------------ variety: fingerprints of past videos
@@ -238,6 +245,7 @@ function setObject(s: PlanScene): { objs: SceneObject[]; stand: [number, number]
     const bg = LIB.backgrounds.find((b) => b.name === st.library)?.data;
     if (bg) return { objs: bg.objects.map((o: SceneObject, i: number) => ({ ...JSON.parse(JSON.stringify(o)), id: `${s.id}_bg${i}`, stage: s.id })), stand: bg.stand || [0, 0] };
   }
+  if (st.type === 'code' && st.code) return { objs: [{ id, name: codeAssets().find((a) => a.name === st.code)?.label || st.code, kind: 'set', stage: s.id, params: { type: 'code', code: st.code, ...(st.opts ? { opts: st.opts } : {}) }, tracks: {} }], stand: (Array.isArray(st.opts?.stand) ? [Number(st.opts!.stand[0]) || 0, Number(st.opts!.stand[1]) || 0] : [0, 0]) as [number, number] };
   if (st.type === 'house') return { objs: [{ id, name: 'Ngôi nhà', kind: 'set', stage: s.id, params: { type: 'house', opts: { seed: st.seed, siding: hexN(st.siding), roofColor: hexN(st.roofColor), doorColor: hexN(st.doorColor), storeys: st.storeys } }, tracks: {} }], stand: STAND.house };
   if (st.type === 'highway') return { objs: [{ id, name: 'Đường cao tốc', kind: 'set', stage: s.id, params: { type: 'highway', opts: {} }, tracks: {} }], stand: STAND.highway };
   if (st.type === 'floor') return { objs: [{ id, name: 'Sàn', kind: 'set', stage: s.id, params: { type: 'floor', w: 40, d: 40, color: hexN(st.color) }, tracks: {} }], stand: STAND.floor };
@@ -254,16 +262,26 @@ function roomLimit(R: { w: number; d: number; h: number }): Limit {
     return s < Infinity ? s * len : null;
   };
 }
+/** Keep the camera on the +z side of a plane (the front of a building). */
+function frontLimit(zMin: number): Limit {
+  return (from, to) => {
+    const dz = to[2] - from[2], len = Math.hypot(to[0] - from[0], to[1] - from[1], dz);
+    if (to[2] >= zMin || Math.abs(dz) < 1e-6 || len < 1e-4) return null;
+    const k = (zMin - from[2]) / dz; return k > 0 && k < 1 ? k * len : null;
+  };
+}
 /** The scene the plan describes: stages, set, props, characters with their moves and lines, a camera per beat, cuts, captions. */
 export function buildFromPlan(p: Plan, name: string): SceneDoc {
   const objects: SceneObject[] = [], cuts: { t: number; camera: string; dissolve?: number }[] = [], captions: { t: number; text: string }[] = [];
   const castId = (n: string) => 'c' + (p.cast.findIndex((c) => c.name === n) + 1);
   const firstObj = new Map<string, string>();   // a person's first object: later scenes share its look
+  const narration: Key[] = [];                  // lines nobody on screen says: the voice-over
   let t = 0.3;
   for (const s of p.scenes) {
     const { objs, stand, room } = setObject(s); objects.push(...objs);
     const at = (x: number, z: number): Vec3 => [r3(stand[0] + x), 0, r3(stand[1] + z)];
-    s.props.forEach((q, i) => objects.push({ id: `${s.id}_p${i}`, name: q.text ? `${q.type}: ${q.text}`.slice(0, 30) : q.type, kind: 'prop', stage: s.id, params: { type: q.type, ...(q.text ? { text: q.text } : {}) }, tracks: { pos: [K(0, at(q.x, q.z))], rotY: [K(0, q.rotY ?? 0)], ...(q.scale ? { scale: [K(0, q.scale)] } : {}) } }));
+    s.props.forEach((q, i) => objects.push({ id: `${s.id}_p${i}`, name: q.text ? `${q.type}: ${q.text}`.slice(0, 30) : q.type.replace(/^code:/, ''), kind: 'prop', stage: s.id,
+      params: q.type.startsWith('code:') ? { type: 'code', code: q.type.slice(5), ...(q.text ? { opts: { text: q.text } } : {}) } : { type: q.type, ...(q.text ? { text: q.text } : {}) }, tracks: { pos: [K(0, at(q.x, q.z))], rotY: [K(0, q.rotY ?? 0)], ...(q.scale ? { scale: [K(0, q.scale)] } : {}) } }));
     // timing of this scene's beats
     const sceneStart = t;
     const timed = s.beats.map((b) => { const n = b.line.split(/\s+/).filter(Boolean).length, d = b.line ? Math.max(0.9, n / p.pace) : (b.action === 'none' ? 1.4 : 1.8), st = t; t += d + 0.3; return { ...b, s: st, d }; });
@@ -279,11 +297,14 @@ export function buildFromPlan(p: Plan, name: string): SceneDoc {
       if (!firstObj.has(c.name)) firstObj.set(c.name, id);
       chars.set(c.name, o); objects.push(o);
     }
-    // where everyone is through the scene (walks), faces, gestures, lines
+    // where everyone is through the scene (walks), faces, gestures, lines. Inside (a room, a code or library set) people
+    // come in and go out through the open front (the camera side), never through a side wall; outside, from the sides.
+    const inside = s.set.type === 'room' || s.set.type === 'code' || s.set.type === 'library';
+    const offstage = (x: number, z: number): Vec3 => (inside ? at(x, z + 3.2) : at(x + (x <= 0 ? -3.4 : 3.4), z));
     const where = new Map<string, Vec3>();
     for (const spot of s.blocking) {
       const firstAct = timed.find((b) => (b.who || b.on) === spot.who && b.action !== 'none');
-      const start = firstAct?.action === 'walk-in' ? at(spot.x + (spot.x <= 0 ? -3.4 : 3.4), spot.z) : at(spot.x, spot.z);
+      const start = firstAct?.action === 'walk-in' ? offstage(spot.x, spot.z) : at(spot.x, spot.z);
       chars.get(spot.who)?.tracks.pos.push(K(0, start)); where.set(spot.who, start);
     }
     for (const b of timed) {
@@ -292,14 +313,15 @@ export function buildFromPlan(p: Plan, name: string): SceneDoc {
         const from = where.get(actor!) || at(spot.x, spot.z);
         let to: Vec3 = from;
         if (b.action === 'walk-in') to = at(spot.x, spot.z);
-        if (b.action === 'walk-out') to = [r3(from[0] + (from[0] <= stand[0] ? -3.6 : 3.6)), 0, from[2]];
+        if (b.action === 'walk-out') to = inside ? [from[0], 0, r3(from[2] + 3.4)] : [r3(from[0] + (from[0] <= stand[0] ? -3.6 : 3.6)), 0, from[2]];
         if (b.action === 'walk-to' && b.to) to = at(b.to[0], b.to[1]);
         if (b.action === 'turn') o.tracks.rotY.push(K(b.s, -90, 'smooth'));
         if (to !== from) {
           const dist = Math.hypot(to[0] - from[0], to[2] - from[2]), dur = Math.max(0.8, dist / 1.6);
           o.tracks.pos.push(K(Math.max(0, b.s - 0.1), from, 'smooth'), K(b.s - 0.1 + dur, to));
-          o.tracks.rotY.push(K(Math.max(0, b.s - 0.15), to[0] > from[0] ? 0 : 180), K(b.s - 0.1 + dur + 0.1, spot.face));
-          where.set(actor!, to);
+          const heading = Math.round(Math.atan2(-(to[2] - from[2]), to[0] - from[0]) * 180 / Math.PI);   // face the way they walk (a character faces +x of its space)
+          o.tracks.rotY.push(K(Math.max(0, b.s - 0.15), heading), ...(b.action === 'walk-out' ? [] : [K(b.s - 0.1 + dur + 0.1, spot.face)]));
+          where.set(actor!, to); (b as any).walkEnd = b.s - 0.1 + dur;   // the shot frames where they arrive
         }
       }
       const sp = b.who ? chars.get(b.who) : null;
@@ -319,22 +341,36 @@ export function buildFromPlan(p: Plan, name: string): SceneDoc {
     }
     for (const o of chars.values()) { for (const k of ['pos', 'rotY', 'expr', 'armL', 'armR', 'say']) { o.tracks[k].sort((a, b) => a.t - b.t); if (!o.tracks[k].length) delete o.tracks[k]; } }
     // a camera per beat, framed on its subject, with its move (kept inside a room)
-    const limit = room ? roomLimit(room) : undefined, front: Vec3 = [stand[0], 1.5, stand[1] + 6];
+    // the camera stays inside a room, and in front of a house (its front wall is at z ≈ 0, people stand at z ≈ 3)
+    const limit = room ? roomLimit(room) : s.set.type === 'house' ? frontLimit(0.6) : undefined, front: Vec3 = [stand[0], 1.5, stand[1] + 6];
     timed.forEach((b, i) => {
       const t0 = Math.max(sceneStart, b.s - 0.12), t1 = i + 1 < timed.length ? Math.max(t0 + 0.3, timed[i + 1].s - 0.12) : b.s + b.d + 0.9;
       const A = (b.on && chars.get(b.on)) || (b.who && chars.get(b.who)) || [...chars.values()][0] || null;
       const B = b.with ? chars.get(b.with) || null : [...chars.values()].find((c) => c !== A) || null;
-      const shot = { ...(shotOf(b.shot) || SHOTS[1]), move: b.move, ...(b.speed != null ? { speed: b.speed } : {}) };
+      // inside a set, a character who faces the open side (the camera side) has nothing in front of them: a POV or
+      // a shot from behind would look out at empty space, so those become a close-up / over-the-shoulder / 3/4 shot
+      let shotId = b.shot;
+      if (inside && A && (shotId === 'pov' || shotId === 'behind')) {
+        const walkEnd = (b as any).walkEnd as number | undefined, f = subjectAt(A, Math.min(t1, walkEnd ?? t0)).f;
+        if (f[1] > 0.2) shotId = shotId === 'pov' ? 'xclose' : B ? 'ots' : 'threequarter';
+      }
+      const shot = { ...(shotOf(shotId) || SHOTS[1]), move: b.move, ...(b.speed != null ? { speed: b.speed } : {}) };
       const id = `${s.id}_cam${i + 1}`, label = `${s.name} · ${i + 1}. ${shotLabel(b.shot)}${A ? ' · ' + (b.on || b.who) : ''}`;
       let tracks: Record<string, Key[]>;
-      if (A) tracks = shotKeys(shot, A, (shot.two ? B : null), t0, t1, front, limit);
+      const walkEnd = (b as any).walkEnd as number | undefined;
+      if (A && walkEnd && !shot.follow && walkEnd < t1 - 0.2) {
+        // someone walks in: the camera already waits on the spot they walk to, and moves from there
+        tracks = shotKeys(shot, A, (shot.two ? B : null), walkEnd, t1, front, limit);
+        for (const k of ['pos', 'target', 'fov', 'roll', 'dof']) if (tracks[k]?.length) tracks[k].unshift({ ...tracks[k][0], t: r3(t0), ease: 'step' as any });
+      } else if (A) tracks = shotKeys(shot, A, (shot.two ? B : null), t0, t1, front, limit);
       else tracks = { pos: [K(t0, [stand[0], 1.6, stand[1] + 6], 'linear'), K(t1, [stand[0], 1.55, stand[1] + 5.4])], target: [K(t0, [stand[0], 1.0, stand[1]])], fov: [K(t0, 45)] };
       objects.push({ id, name: label.slice(0, 48), kind: 'camera', stage: s.id, params: {}, tracks });
       cuts.push({ t: r3(cuts.length ? t0 : 0), camera: id, ...(b.transition === 'dissolve' && cuts.length ? { dissolve: 9 } : {}) });
     });
-    // captions for the lines
+    // captions for the lines (and the narrator's lines, spoken by the voice-over)
     for (const b of timed) {
       if (!b.line) continue;
+      if (!b.who) narration.push({ t: r3(b.s), v: b.line, d: r3(b.d) });
       const ws = b.line.split(/\s+/).filter(Boolean), step = b.d / ws.length;
       if (p.captionWords === 2) captionsFromWords(ws.map((w, i) => ({ w, s: b.s + i * step, e: b.s + (i + 0.85) * step }))).forEach(([ct, text]: [number, string], i: number) => captions.push({ t: r3(i === 0 ? b.s : ct), text }));
       else for (let i = 0; i < ws.length; i += p.captionWords) captions.push({ t: r3(b.s + i * step), text: ws.slice(i, i + p.captionWords).join(' ') });
@@ -343,6 +379,9 @@ export function buildFromPlan(p: Plan, name: string): SceneDoc {
     t += 0.4;   // a breath between scenes
   }
   const duration = r3(Math.max(2, t + 0.4));
+  // the voice-over: an unseen speaker (far off stage, hidden) whose "say" lines get a voice like anyone's (Giọng đọc)
+  if (narration.length && p.scenes.length) objects.push({ id: 'narrator', name: 'Người dẫn (giọng kể)', kind: 'char', stage: p.scenes[0].id, hidden: true,
+    params: { style: 'buzz', ...(p.voice ? { voice: { instruction: p.voice } } : {}) }, tracks: { pos: [K(0, [0, 0, -60])], say: narration } });
   return normalize({
     version: 1, name, fps: 60, width: 1080, height: 1920, duration,
     stages: p.scenes.map((s) => ({ id: s.id, name: s.name, mood: s.sky, lightPreset: s.light, look: s.look })),

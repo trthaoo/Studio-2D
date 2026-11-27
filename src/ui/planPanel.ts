@@ -3,7 +3,7 @@
 // beat's line, face, gesture, action, camera shot and move, transition, effect) to change by hand. Then "Dựng" builds
 // it into an editable scene, or "Duyệt & xuất video" builds and renders. Each approved plan is remembered
 // (Library/plans) so the next videos are told to be different, and the review shows what repeats.
-import { S, emit, edit, newProject, toast, save } from '../state';
+import { S, on, emit, edit, newProject, toast, save } from '../state';
 import { h, ask } from './dom';
 import { AIH, renderAiSetup } from './ai';
 import { LIB, loadLibrary, saveLibrary, safeName } from '../library';
@@ -17,15 +17,24 @@ import { randomLook } from '../looks';
 import { fit } from './timeline';
 import {
   Plan, PlanScene, PlanBeat, PlanChar, SetType, Action, cleanPlan, cleanLook, planSystem, planPrompt, parseReply, localPlan, buildFromPlan, fingerprint, novelty,
-  freshPick, usedRecently, allShotIds, shotLabel, MOVES, ROOM_KINDS, ROOM_KIND_VI, VIEWS, VIEW_VI, FLOORS, SET_VI, ACTION_VI, SKY_VI, planScript,
+  freshPick, usedRecently, allShotIds, shotLabel, MOVES, ROOM_KINDS, ROOM_KIND_VI, VIEWS, VIEW_VI, FLOORS, SET_VI, ACTION_VI, SKY_VI, planScript, codeSetNames, codePropNames,
 } from '../plan';
 
 interface ChatMsg { role: 'user' | 'ai'; text: string }
 let st: { project: string; chat: ChatMsg[]; plan: Plan | null; busy: boolean } = { project: '\u0000', chat: [], plan: null, busy: false };
+let lastSaved = '';   // the plan as this panel last wrote it: anything else in scene.json came from outside (Antigravity, Claude)
 function state() {
-  if (st.project !== S.project) st = { project: S.project, chat: [...(S.doc.chat || [])], plan: S.doc.plan ? cleanPlan(S.doc.plan) : null, busy: false };
+  const disk = S.doc.plan ? JSON.stringify(S.doc.plan) : '';
+  const fromOutside = st.project === S.project && !st.busy && disk && disk !== lastSaved && disk !== JSON.stringify(st.plan);
+  if (st.project !== S.project || fromOutside) {
+    st = { project: S.project, chat: [...(S.doc.chat || [])], plan: S.doc.plan ? cleanPlan(S.doc.plan) : null, busy: false };
+    lastSaved = st.plan ? JSON.stringify(st.plan) : '';
+  }
   return st;
 }
+// a plan written into scene.json from outside (an Antigravity / Claude skill): show it for review at once
+on('doc', () => { if (S.ws === 'script' && S.doc.plan && JSON.stringify(S.doc.plan) !== lastSaved && !st.busy && host?.isConnected) { state(); rerender(); } });
+let host: HTMLElement | null = null;
 const HAIR_VI: Record<string, string> = { mess: 'Rối, có xoáy', bowl: 'Úp tô', side: 'Rẽ lệch', spiky: 'Dựng gai', curly: 'Xoăn', afro: 'Afro', bun: 'Búi tó', ponytail: 'Đuôi ngựa', long: 'Dài', flattop: 'Đầu bằng', buzz: 'Húi cua', bald: 'Hói' };
 const BUILD_VI: Record<string, string> = { average: 'Trung bình', slim: 'Gầy', tall: 'Cao', short: 'Thấp', stout: 'Đậm', big: 'To con', kid: 'Trẻ con' };
 const OUTFIT_VI: Record<string, string> = { plain: 'Trơn', tee: 'Áo phông', polo: 'Polo', shirt: 'Sơ mi', suit: 'Vest', uniform: 'Đồng phục', hoodie: 'Hoodie', jacket: 'Áo khoác', vest: 'Gi-lê', stripes: 'Kẻ sọc', plaid: 'Ca-rô', overalls: 'Quần yếm', apron: 'Tạp dề', sweater: 'Áo len', cardigan: 'Cardigan', hivis: 'Áo phản quang', tracksuit: 'Đồ thể thao', labcoat: 'Áo blouse', dress: 'Váy' };
@@ -46,7 +55,7 @@ export async function planPanel(root: HTMLElement, modeBar: HTMLElement) {
   const P = state();
   const msgs = h('div', { class: 'chatlog' }), status = h('div', { class: 'hint chatstatus' }), setupBox = h('div', {});
   const input = h('textarea', { rows: 4, placeholder: P.plan ? 'Muốn sửa gì? Ví dụ: đổi sang đêm mưa, thêm một cảnh ngoài phố, nhiều góc máy động hơn...' : 'Mô tả video bạn muốn: chủ đề, nhân vật, giọng điệu, độ dài, ngôn ngữ thoại, phong cách hình...' }) as HTMLTextAreaElement;
-  const review = h('div', { class: 'planreview' });
+  const review = h('div', { class: 'planreview' }); host = review;
   const drawChat = () => {
     msgs.replaceChildren(...(P.chat.length ? P.chat.map((m) => h('div', { class: 'msg ' + m.role }, h('div', { class: 'who' }, m.role === 'user' ? 'Bạn' : 'AI'), h('div', { class: 'body' }, m.text)))
       : [h('div', { class: 'hint' }, 'Kể cho AI bạn muốn video thế nào. AI viết một plan mới hoàn toàn, khác các video trước (bối cảnh, ánh sáng, shader, góc máy, ngoại hình). Bạn sửa tiếp bằng chat hoặc sửa tay ở bảng bên phải.')]));
@@ -92,7 +101,7 @@ let saveT = 0;
 /** Keep the chat and the plan with the project (they come back when it is opened again). */
 function persist() {
   if (!S.project) return; clearTimeout(saveT);
-  saveT = window.setTimeout(() => { S.doc.chat = st.chat.slice(-40); if (st.plan) S.doc.plan = st.plan; save(); }, 600);
+  saveT = window.setTimeout(() => { S.doc.chat = st.chat.slice(-40); if (st.plan) { S.doc.plan = st.plan; lastSaved = JSON.stringify(st.plan); } save(); }, 600);
 }
 
 // ---------------------------------------------------------------- the review
@@ -153,7 +162,8 @@ function renameIn(P: Plan, old: string, nn: string) {
 
 function sceneCard(P: Plan, s: PlanScene, si: number, people: Array<[string, string]>) {
   const st0 = s.set;
-  const setFields: any[] = [field('Loại', sel(st0.type, (Object.keys(SET_VI) as SetType[]).filter((k) => k !== 'library' || LIB.backgrounds.length).map((k) => [k, SET_VI[k]]), (v) => { s.set = cleanPlan({ cast: P.cast, scenes: [{ set: { type: v, library: LIB.backgrounds[0]?.name } }] }).scenes[0].set; }))];
+  const setFields: any[] = [field('Loại', sel(st0.type, (Object.keys(SET_VI) as SetType[]).filter((k) => (k !== 'library' || LIB.backgrounds.length) && (k !== 'code' || codeSetNames().length)).map((k) => [k, SET_VI[k]]), (v) => { s.set = cleanPlan({ cast: P.cast, scenes: [{ set: { type: v, library: LIB.backgrounds[0]?.name, code: codeSetNames()[0] } }] }).scenes[0].set; }))];
+  if (st0.type === 'code') setFields.push(field('Bối cảnh', sel(st0.code, codeSetNames().map((n) => [n, n] as [string, string]), (v) => { st0.code = v; })));
   if (st0.type === 'room') setFields.push(field('Phòng', sel(st0.kind, opts(ROOM_KINDS, ROOM_KIND_VI), (v) => { st0.kind = v; })), field('Tường', color(st0.wall, (v) => { st0.wall = v; })), field('Sàn', sel(st0.floor, opts(FLOORS, { wood: 'Gỗ', tile: 'Gạch', carpet: 'Thảm' }), (v) => { st0.floor = v; }), color(st0.floorColor || '#a8743e', (v) => { st0.floorColor = v; }, 'Màu sàn')), field('Ngoài cửa sổ', sel(st0.view, opts(VIEWS, VIEW_VI), (v) => { st0.view = v; })), field('Biến thể', nbox(st0.seed, (v) => { st0.seed = Math.round(v); }, 1)));
   if (st0.type === 'house') setFields.push(field('Tường nhà', color(st0.siding || '#d8cfc0', (v) => { st0.siding = v; })), field('Mái', color(st0.roofColor || '#5a4a44', (v) => { st0.roofColor = v; })), field('Cửa', color(st0.doorColor || '#a83a2a', (v) => { st0.doorColor = v; })), field('Số tầng', sel(String(st0.storeys || 1), [['1', '1'], ['2', '2']], (v) => { st0.storeys = +v; })), field('Biến thể', nbox(st0.seed, (v) => { st0.seed = Math.round(v); }, 1)));
   if (st0.type === 'floor') setFields.push(field('Màu sàn', color(st0.color, (v) => { st0.color = v; })));
@@ -171,7 +181,7 @@ function sceneCard(P: Plan, s: PlanScene, si: number, people: Array<[string, str
     // props
     h('details', { open: s.props.length > 0 }, h('summary', {}, `Đồ vật thêm (${s.props.length})`),
       h('table', { class: 'ptable' }, h('tr', {}, ...['Loại', 'Chữ trên đó', 'Trái/phải', 'Trước/sau', 'Xoay', ''].map((x) => h('th', {}, x))),
-        ...s.props.map((q, i) => h('tr', {}, h('td', {}, sel(q.type, opts(PROP_TYPES as string[]), (v) => { q.type = v; })), h('td', {}, txt(q.text, (v) => { q.text = v || undefined; })), h('td', {}, nbox(q.x, (v) => { q.x = v; })), h('td', {}, nbox(q.z, (v) => { q.z = v; })), h('td', {}, nbox(q.rotY ?? 0, (v) => { q.rotY = v; }, 5)), h('td', {}, h('button', { class: 'rbtn', onclick: () => { s.props.splice(i, 1); rerender(); } }, 'Xoá'))))),
+        ...s.props.map((q, i) => h('tr', {}, h('td', {}, sel(q.type, [...opts(PROP_TYPES as string[]), ...codePropNames().map((n) => [n, n.slice(5) + ' (code)'] as [string, string])], (v) => { q.type = v; })), h('td', {}, txt(q.text, (v) => { q.text = v || undefined; })), h('td', {}, nbox(q.x, (v) => { q.x = v; })), h('td', {}, nbox(q.z, (v) => { q.z = v; })), h('td', {}, nbox(q.rotY ?? 0, (v) => { q.rotY = v; }, 5)), h('td', {}, h('button', { class: 'rbtn', onclick: () => { s.props.splice(i, 1); rerender(); } }, 'Xoá'))))),
       h('button', { onclick: () => { s.props.push({ type: 'sign', text: 'SALE', x: 1.2, z: -1 }); rerender(); } }, 'Thêm đồ vật')),
     // blocking
     h('details', {}, h('summary', {}, `Vị trí đứng (${s.blocking.length})`),

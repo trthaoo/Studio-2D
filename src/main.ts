@@ -84,6 +84,11 @@ if (import.meta.hot) {
 // ---------------------------------------------------------------- start
 const warnedLooks = new Set<string>();
 on('project', () => {
+  // a project an Antigravity / Claude skill wrote as a plan only: open it on the review, ready to approve
+  if (S.doc.plan && !S.doc.objects.some((o) => o.kind === 'camera' || o.kind === 'char')) {
+    S.ws = 'script'; emit('ws'); document.getElementById('start')!.hidden = true;
+    setTimeout(() => toast('Project này có plan chờ duyệt: xem và sửa ở bên phải, rồi bấm Dựng hoặc Duyệt và xuất video.', 7000), 400);
+  }
   document.title = S.project ? `${S.project} — 2D Studio` : '2D Studio';
   // one person in several stages with different looks (each stage has its own object): say so once on opening
   const g = lookMismatches(S.doc);

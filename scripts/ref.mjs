@@ -13,7 +13,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2), name = argv[0];
 const opt = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
 const safe = (s) => String(s).replace(/[^\p{L}\p{N} _.\-()]/gu, '_').trim();
-const out = path.join(ROOT, 'Projects', safe(name), 'ref');
+const out = opt('--out') ? path.resolve(opt('--out')) : path.join(ROOT, 'Projects', safe(name), 'ref');   // --out: analyse into any folder (research)
 fs.mkdirSync(out, { recursive: true });
 const step = (s) => console.log('PROGRESS ' + s);
 const ff = (args) => spawnSync(ffmpegPath, ['-hide_banner', '-v', 'error', ...args], { encoding: 'utf8', maxBuffer: 1 << 26 });
@@ -24,7 +24,7 @@ try {
   if (url) {
     step('Đang tải video từ link');
     fs.rmSync(video, { force: true });
-    const r = spawnSync('python', ['-I', '-m', 'yt_dlp', '-q', '--no-playlist', '--no-progress', '-f', 'mp4/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best', '--merge-output-format', 'mp4', '--ffmpeg-location', ffmpegPath, '-o', video, url], { encoding: 'utf8' });
+    const r = spawnSync('python', ['-I', '-m', 'yt_dlp', '-q', '--no-playlist', '--no-progress', '-f', 'bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b[ext=mp4]/b' /* picture AND sound: "mp4" alone can pick a silent video-only stream */, '--merge-output-format', 'mp4', '--ffmpeg-location', ffmpegPath, '-o', video, url], { encoding: 'utf8' });
     if (r.status !== 0 || !fs.existsSync(video)) throw new Error('Không tải được video: ' + (r.stderr || r.stdout).slice(-500));
   }
   if (!fs.existsSync(video)) throw new Error('Chưa có video tham khảo (dán link hoặc chọn file).');
